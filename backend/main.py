@@ -187,7 +187,7 @@ async def forbidden_handler(request: Request, exc):
 
 # ================= ROUTES =================
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {
         "name": "Crazy Brain SaaS API",
