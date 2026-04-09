@@ -29,7 +29,6 @@ services:
 
   - type: web
     name: crazy-brain-web
-    plan: free
     runtime: static
     rootDir: frontend
     buildCommand: npm ci && npm run build
