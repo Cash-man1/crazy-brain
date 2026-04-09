@@ -1,0 +1,45 @@
+# Blueprint Render: https://render.com/docs/infrastructure-as-code
+# 1) Crea un nuovo Blueprint su Render e collega questo repo.
+# 2) Dopo il primo deploy, copia l'URL del backend nel VITE_API_URL del frontend
+#    (o imposta a mano nelle Environment del sito statico).
+# 3) Imposta FRONTEND_URL (e opzionale CORS_EXTRA_ORIGINS) sul servizio Docker
+#    all'URL pubblico del frontend (es. https://crazy-brain-web.onrender.com).
+
+version: "1"
+
+services:
+  - type: web
+    name: crazy-brain-api
+    region: frankfurt
+    # Playwright + Chromium: su Free puo andare stretto di RAM; in quel caso passa a Starter.
+    plan: free
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_EXTRA_ORIGINS
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+
+  - type: web
+    name: crazy-brain-web
+    region: frankfurt
+    plan: free
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    # Fallback SPA (React Router): se il deploy fallisce, aggiungi la stessa regola nel pannello Render.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        sync: false

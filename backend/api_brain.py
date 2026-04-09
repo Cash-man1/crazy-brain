@@ -7,17 +7,118 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
+import time
 import re
 import httpx
-from live_scraper import scraper
+import json
+import asyncio
+import subprocess
+import sys
+from pathlib import Path
+from live_scraper import scraper, DEFAULT_WINDOW_SIZE
+import threading
+import os
 
 from database import get_db, User, get_user_by_id
 from security import get_current_user_id, get_client_ip, limiter
-from brain_engine import BrainEngine, ALL_SEGMENTS
+from brain_engine import BrainEngine, ALL_SEGMENTS, THEORETICAL_PROBS
+from live_window_stats import compute_live_window_stats
+from notifier import notify_hot_signals
 
 router = APIRouter(prefix="/brain", tags=["Crazy Time Tool"])
 CRAZY_TIME_SOURCE_URL = "https://www.casino.org/casinoscores/it/crazy-time/"
 SCRAPER_VERSION = "2026-04-01-v4"
+SCRAPE_WORKER = Path(__file__).resolve().parent / "scrape_worker.py"
+WORKER_PYTHON = Path(__file__).resolve().parent.parent / ".venv" / "Scripts" / "python.exe"
+MAX_ALLOWED_SOURCE_LAG_SECONDS = 20
+SCRAPE_RETRY_ATTEMPTS = 1
+
+
+def _run_scrape_worker(limit: int = 60) -> Dict[str, Any]:
+    python_bin = str(WORKER_PYTHON) if WORKER_PYTHON.exists() else sys.executable
+    cmd = [
+        python_bin,
+        str(SCRAPE_WORKER),
+        "--limit",
+        str(limit),
+        "--screenshot-prefix",
+        "",
+    ]
+    timeout_sec = 30 if limit <= 120 else 50
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"worker rc={proc.returncode}")
+    return json.loads(proc.stdout)
+
+
+def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
+    """
+    Esegue lo scrape e, se la sorgente e' in ritardo oltre soglia, riprova subito
+    scegliendo il payload con lag migliore.
+    """
+    # 1) Prima prova con worker Playwright (tabella reale => mapping esito piu accurato).
+    best_payload: Optional[Dict[str, Any]] = None
+    best_rows: List[Dict[str, Any]] = []
+    best_lag: Optional[int] = None
+
+    for _ in range(max(1, SCRAPE_RETRY_ATTEMPTS)):
+        try:
+            payload = _run_scrape_worker(limit=limit)
+        except Exception:
+            payload = {"rows": [], "screenshot": None}
+        rows = payload.get("rows") or []
+        lag = _time_lag_seconds(rows)
+
+        current = lag if lag is not None else 10**9
+        best = best_lag if best_lag is not None else 10**9
+        if rows and (best_payload is None or current < best):
+            best_payload, best_rows, best_lag = payload, rows, lag
+
+        if lag is not None and lag <= MAX_ALLOWED_SOURCE_LAG_SECONDS:
+            return payload
+
+    # 2) Solo se worker non produce righe utili, fallback HTML diretto.
+    if best_payload is None or not (best_payload.get("rows") or []):
+        try:
+            rows_html = _fetch_live_rows_sync()[:limit]
+            if rows_html:
+                return {"rows": rows_html, "screenshot": None}
+        except Exception:
+            pass
+
+    if best_payload is None:
+        return {"rows": []}
+    return best_payload
+
+
+def _time_lag_seconds(rows: List[Dict[str, Any]]) -> Optional[int]:
+    if not rows:
+        return None
+    t = str(rows[0].get("time") or "")
+    m = re.match(r"^(\d{1,2}):(\d{2})$", t)
+    if not m:
+        return None
+    row_min = int(m.group(1)) * 60 + int(m.group(2))
+    now = datetime.now()
+    now_min = now.hour * 60 + now.minute
+    lag_min = now_min - row_min
+    if lag_min < 0:
+        lag_min += 24 * 60
+    return lag_min * 60
+
+
+def _rows_latest_first(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def key(r: Dict[str, Any]) -> int:
+        t = str(r.get("time") or "")
+        m = re.match(r"^(\d{1,2}):(\d{2})$", t)
+        if not m:
+            return -1
+        return int(m.group(1)) * 60 + int(m.group(2))
+    return sorted(rows, key=key, reverse=True)
+
+
+def _rows_oldest_first(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return list(reversed(_rows_latest_first(rows)))
 
 
 # ============================================================================
@@ -29,11 +130,82 @@ active_sessions: Dict[int, BrainEngine] = {}
 auto_state: Dict[int, Dict[str, Any]] = {}
 PUBLIC_GUEST_ID = 0
 
+# Public autopoll cache: keep responses fast even at 1s refresh.
+_public_cache: Dict[str, Any] = {"ts": 0.0, "payload": None}
+_public_lock = threading.Lock()
+_public_inflight = False
+_public_state_lock = threading.Lock()
+_public_bootstrapped = False
+_public_refresh_lock = threading.Lock()
+
+PUBLIC_HISTORY_FILE = Path(__file__).resolve().parent / "public_history.json"
+PUBLIC_PATTERNS_FILE = Path(__file__).resolve().parent / "public_patterns.json"
+PUBLIC_HISTORY_MAX_ITEMS = 300
+
+
+def _keep_last_300(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    # Mantieni l'ordine (oldest->newest) e tieni solo le ultime N.
+    return items[-PUBLIC_HISTORY_MAX_ITEMS:]
+
+
+def _load_public_history() -> List[Dict[str, Any]]:
+    try:
+        if not PUBLIC_HISTORY_FILE.exists():
+            return []
+        raw = PUBLIC_HISTORY_FILE.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        items = data.get("items") if isinstance(data, dict) else []
+        if not isinstance(items, list):
+            return []
+        return _keep_last_300(items)
+    except Exception:
+        return []
+
+
+def _save_public_history(items: List[Dict[str, Any]]) -> None:
+    try:
+        items2 = _keep_last_300(items)
+        PUBLIC_HISTORY_FILE.write_text(
+            json.dumps({"saved_at": time.time(), "items": items2}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _load_public_patterns() -> Dict[str, Any]:
+    try:
+        if not PUBLIC_PATTERNS_FILE.exists():
+            return {}
+        raw = PUBLIC_PATTERNS_FILE.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_public_patterns(patterns: Dict[str, Any]) -> None:
+    try:
+        if not isinstance(patterns, dict):
+            return
+        PUBLIC_PATTERNS_FILE.write_text(
+            json.dumps({"saved_at": time.time(), "patterns": patterns}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
 
 def get_or_create_session(user_id: int) -> BrainEngine:
     """Recupera o crea sessione BrainEngine per utente"""
     if user_id not in active_sessions:
-        active_sessions[user_id] = BrainEngine(username=f"user_{user_id}")
+        brain = BrainEngine(username=f"user_{user_id}")
+        # Dashboard pubblica: 1 previsione/giro (max EV) per statistiche più stabili (più tentativi).
+        if user_id == PUBLIC_GUEST_ID:
+            brain.enable_continuous_prediction_stats = True
+        active_sessions[user_id] = brain
     return active_sessions[user_id]
 
 
@@ -44,14 +216,16 @@ def clear_session(user_id: int):
 
 
 def _normalize_segment(raw_text: str) -> Optional[str]:
-    t = raw_text.lower()
-    if "cash hunt" in t:
+    t = raw_text.lower().strip()
+    t_norm = re.sub(r"[\s_\-]+", "", t)
+    # Bonus: gestisce varianti testo + nomi file icone (es. crazytime.png, cashhunt.svg, pachiko.png)
+    if "cash hunt" in t or "cashhunt" in t_norm:
         return "CH"
-    if "coin flip" in t:
+    if "coin flip" in t or "coinflip" in t_norm:
         return "CF"
-    if "pachinko" in t:
+    if "pachinko" in t or "pachiko" in t or "pachinko" in t_norm or "pachiko" in t_norm:
         return "PA"
-    if "crazy time" in t:
+    if "crazy time" in t or "crazytime" in t_norm:
         return "CT"
     for n in ("10", "5", "2", "1"):
         if re.search(rf"(^|\D){n}x?($|\D)", t):
@@ -62,18 +236,37 @@ def _normalize_segment(raw_text: str) -> Optional[str]:
 def _clean_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     cleaned: List[Dict[str, Any]] = []
     for row in rows:
-        slot = str(row.get("slot_result") or "")
-        wheel = str(row.get("wheel_result") or "")
-        seg = row.get("segment") or _normalize_segment(wheel) or _normalize_segment(slot)
-        if seg not in ALL_SEGMENTS:
-            continue
+        slot = str(row.get("slot_result") or "").strip()
+        slot_icon = str(row.get("slot_icon") or "").strip()
+        wheel = str(row.get("wheel_result") or "").strip()
+        wheel_icon = str(row.get("wheel_icon") or "").strip()
+        # Per robustezza: per la ruota prioritizza i campi visuali (wheel_icon/wheel_result),
+        # poi fallback ai campi legacy che in alcuni casi possono essere sporchi.
+        wheel_visual_seg = _normalize_segment(wheel_icon) or _normalize_segment(wheel)
+        wheel_legacy_seg = _normalize_segment(str(row.get("wheel_segment") or "")) or _normalize_segment(str(row.get("segment") or ""))
+        wheel_seg = wheel_visual_seg or wheel_legacy_seg
+        # For "Pachinko + Perso" cases, slot_result may be "Perso" but icon tells the real segment.
+        slot_seg = _normalize_segment(slot_icon) or _normalize_segment(slot) or _normalize_segment(str(row.get("slot_segment") or ""))
+        seg = wheel_seg or slot_seg
+        top = row.get("top_slot_multipliers") or []
+        final_mult: Optional[int] = None
+        if top:
+            final_mult = max(top)
+        elif wheel_seg and str(wheel_seg).isdigit():
+            final_mult = int(wheel_seg)
         cleaned.append(
             {
                 "time": row.get("time"),
-                "segment": seg,
-                "slot_result": seg,
-                "wheel_result": seg,
-                "top_slot_multipliers": row.get("top_slot_multipliers") or [],
+                "datetime_text": row.get("datetime_text") or row.get("time"),
+                "segment": seg,  # per compat UI (prefer wheel)
+                "wheel_segment": wheel_seg,
+                "slot_segment": slot_seg,
+                "slot_result": slot,
+                "slot_icon": slot_icon or None,
+                "wheel_result": wheel,
+                "wheel_icon": wheel_icon or None,
+                "top_slot_multipliers": top,
+                "final_multiplier": final_mult,
             }
         )
     return cleaned
@@ -127,6 +320,15 @@ async def _fetch_live_rows() -> List[Dict[str, Any]]:
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=headers) as client:
         response = await client.get(CRAZY_TIME_SOURCE_URL)
+        response.raise_for_status()
+        html = response.text
+    return _extract_rows_from_html(html)
+
+
+def _fetch_live_rows_sync() -> List[Dict[str, Any]]:
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    with httpx.Client(timeout=12, follow_redirects=True, headers=headers) as client:
+        response = client.get(CRAZY_TIME_SOURCE_URL)
         response.raise_for_status()
         html = response.text
     return _extract_rows_from_html(html)
@@ -324,7 +526,7 @@ async def auto_brain_status(
 ):
     """
     Modalità automatica:
-    - ogni 6 secondi legge la pagina sorgente
+    - ogni 2 secondi legge la pagina sorgente
     - aggiunge nuovi spin nel BrainEngine
     - restituisce segnali caldi e ultime righe cronologia
     """
@@ -336,11 +538,12 @@ async def auto_brain_status(
 
     state = auto_state.setdefault(
         user_id,
-        {"last_poll": datetime.utcnow() - timedelta(seconds=7), "seen": set(), "rows": []}
+        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": []}
     )
 
     now = datetime.utcnow()
-    should_poll = (now - state["last_poll"]).total_seconds() >= 6
+    # Se non abbiamo ancora righe, poll immediatamente (bootstrap UI + segnali).
+    should_poll = (not state.get("rows")) or (now - state["last_poll"]).total_seconds() >= 2
     parsed_rows: List[Dict[str, Any]] = state["rows"]
     new_count = 0
     source_ok = True
@@ -348,29 +551,81 @@ async def auto_brain_status(
 
     if should_poll:
         try:
-            fetched_rows = await _fetch_live_rows()
+            payload = await asyncio.to_thread(_run_scrape_worker_fresh, 80)
+            fetched_rows = payload.get("rows") or []
+            lag_seconds = _time_lag_seconds(fetched_rows)
             parsed_rows = _clean_rows(fetched_rows)
+            state["last_screenshot"] = payload.get("screenshot")
             state["rows"] = parsed_rows
             state["last_poll"] = now
-            if parsed_rows:
-                source_error = None
+            if not parsed_rows:
+                source_ok = False
+                source_error = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
+            else:
+                source_error = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
         except Exception as exc:
             source_ok = False
             source_error = str(exc)
 
         for row in parsed_rows:
-            key = f"{row.get('time')}-{row.get('segment')}"
+            # Dedup robusto: la stessa "ora" può ripetersi (es. 14:48) -> includiamo contenuto della riga.
+            dt = str(row.get("datetime_text") or row.get("time") or "").strip().lower()
+            slot = str(row.get("slot_result") or "").strip().lower()
+            wheel = str(row.get("wheel_result") or "").strip().lower()
+            mults = row.get("top_slot_multipliers") or []
+            mult_sig = ",".join(str(x) for x in mults)
+            key = f"{dt}|{slot}|{wheel}|{mult_sig}"
             if key in state["seen"]:
                 continue
-            seg = row.get("segment")
-            if seg not in ALL_SEGMENTS:
-                continue
+            wheel_seg = row.get("wheel_segment") or row.get("segment")
+            slot_seg = row.get("slot_segment")
+            slot_raw = str(row.get("slot_result") or "").strip().lower()
 
-            top = row.get("top_slot_multipliers") or []
-            if top:
-                brain.add_spin(segment=seg, multiplier=max(top), mult_segment=seg)
-            else:
-                brain.add_spin(segment=seg)
+            # Regole (come richiesto):
+            # - Esito ruota arriva sempre (wheel_seg).
+            # - Per NUMERI (1/2/5/10): il valore finale lo prendiamo DIRETTAMENTE dalla colonna "Moltip." della pagina.
+            #   Il sito fa già il calcolo (es. ruota=10 -> Moltip.=10X; se top slot coincide -> Moltip.=20X ecc.).
+            # - Per BONUS: i moltiplicatori li prendiamo dalla pagina (range/lista); usiamo max(top) come valore da inviare,
+            #   e salviamo min/max/lista in bonus_data.
+            if wheel_seg in ALL_SEGMENTS:
+                top = row.get("top_slot_multipliers") or []
+                bonus_data: Dict[str, Any] = {
+                    "slot_result": row.get("slot_result"),
+                    "wheel_result": row.get("wheel_result"),
+                    "slot_segment": slot_seg,
+                    "wheel_segment": wheel_seg,
+                    "top_slot_multipliers": top,
+                }
+
+                multiplier_to_send: Optional[int] = None
+
+                if str(wheel_seg).isdigit():
+                    base = int(wheel_seg)
+                    bonus_data["base_wheel"] = base
+                    if top:
+                        bonus_data["min_multiplier"] = min(top)
+                        bonus_data["max_multiplier"] = max(top)
+                        bonus_data["final_multiplier"] = max(top)
+                        multiplier_to_send = max(top)
+                    else:
+                        # fallback se la pagina non mostra Moltip. per qualche motivo
+                        bonus_data["final_multiplier"] = base
+                        multiplier_to_send = base
+                else:
+                    # bonus
+                    if top:
+                        bonus_data["min_multiplier"] = min(top)
+                        bonus_data["max_multiplier"] = max(top)
+                        bonus_data["final_multiplier"] = max(top)
+                        multiplier_to_send = max(top)
+                    else:
+                        bonus_data["final_multiplier"] = None
+                        multiplier_to_send = None
+
+                if multiplier_to_send is not None:
+                    brain.add_spin(segment=wheel_seg, multiplier=multiplier_to_send, mult_segment=wheel_seg, bonus_data=bonus_data)
+                else:
+                    brain.add_spin(segment=wheel_seg, bonus_data=bonus_data)
             state["seen"].add(key)
             new_count += 1
 
@@ -381,14 +636,20 @@ async def auto_brain_status(
         "scraper_version": SCRAPER_VERSION,
         "debug_now": datetime.utcnow().isoformat(),
         "auto_mode": True,
-        "poll_interval_seconds": 6,
+        "poll_interval_seconds": 2,
         "source_url": CRAZY_TIME_SOURCE_URL,
         "source_ok": source_ok,
         "source_error": source_error,
+        "source_lag_seconds": _time_lag_seconds(state.get("rows") or []),
+        "scraper_last_error": getattr(scraper, "last_error", None),
+        "scraper_last_rows_count": getattr(scraper, "last_rows_count", None),
+        "scraper_module": getattr(scraper, "__class__", type(scraper)).__module__,
         "last_poll": state["last_poll"].isoformat(),
+        "last_screenshot": state.get("last_screenshot"),
         "new_rows_added": new_count,
         "tracked_rows": len(state["seen"]),
-        "latest_rows": list(reversed(state["rows"][-12:])),
+        "latest_rows": _rows_latest_first(state["rows"])[:24],
+        "source_latest_time": (_rows_latest_first(state["rows"])[0].get("time") if state.get("rows") else None),
         "next_hot_signal": next_pick,
         "hot_signals": hot_signals,
         "session": brain.get_session_status(),
@@ -408,67 +669,220 @@ async def auto_brain_public():
 
     state = auto_state.setdefault(
         user_id,
-        {"last_poll": datetime.utcnow() - timedelta(seconds=7), "seen": set(), "rows": []}
+        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": []}
     )
 
+    # Bootstrap from persisted last-6h history (gives confidence immediately after restart).
+    global _public_bootstrapped
+    if not _public_bootstrapped:
+        pat = _load_public_patterns()
+        if isinstance(pat, dict) and isinstance(pat.get("patterns"), dict):
+            try:
+                brain.pattern_engine.import_patterns(pat.get("patterns") or {})
+            except Exception:
+                pass
+        persisted = _load_public_history()
+        if persisted:
+            # Rebuild state rows and brain spins oldest->newest.
+            with _public_state_lock:
+                state["rows"] = [it.get("row") for it in persisted if isinstance(it.get("row"), dict)]
+                state["seen"] = set(
+                    str(it.get("key")) for it in persisted if isinstance(it.get("key"), str) and it.get("key")
+                )
+                state["last_poll"] = datetime.utcnow()
+            # Feed brain with the stored rows (oldest first).
+            for it in persisted:
+                row = it.get("row")
+                if not isinstance(row, dict):
+                    continue
+                wheel_seg = row.get("wheel_segment") or row.get("segment")
+                if wheel_seg not in ALL_SEGMENTS:
+                    continue
+                top = row.get("top_slot_multipliers") or []
+                bonus_data: Dict[str, Any] = {
+                    "slot_result": row.get("slot_result"),
+                    "wheel_result": row.get("wheel_result"),
+                    "slot_segment": row.get("slot_segment"),
+                    "wheel_segment": wheel_seg,
+                    "top_slot_multipliers": top,
+                }
+                mult: Optional[int] = None
+                if str(wheel_seg).isdigit():
+                    base = int(wheel_seg)
+                    bonus_data["base_wheel"] = base
+                    mult = max(top) if top else base
+                else:
+                    mult = max(top) if top else None
+                if mult is not None:
+                    brain.add_spin(segment=wheel_seg, multiplier=mult, mult_segment=wheel_seg, bonus_data=bonus_data)
+                else:
+                    brain.add_spin(segment=wheel_seg, bonus_data=bonus_data)
+        _public_bootstrapped = True
+
+    def _build_payload(source_ok: bool, source_error: Optional[str], new_rows_added: int) -> Dict[str, Any]:
+        hot_signals = brain.get_best_signals(4)
+        next_pick = hot_signals[0] if hot_signals else None
+        mini_brains = brain.get_all_brains_status()
+        # Return full 6h history (capped for UI/perf).
+        rows_latest = _rows_latest_first(state["rows"])[:600]
+        saved_rows = len(_load_public_history())
+        chrono = _rows_oldest_first(state.get("rows") or [])
+        live_statistics = compute_live_window_stats(chrono, ALL_SEGMENTS, THEORETICAL_PROBS)
+        live_statistics["brain_spins_recorded"] = brain.spin_count
+        live_statistics["persisted_file_rows"] = saved_rows
+        return {
+            "scraper_version": SCRAPER_VERSION,
+            "debug_now": datetime.utcnow().isoformat(),
+            "auto_mode": True,
+            "public_mode": True,
+            "poll_interval_seconds": 1,
+            "source_url": CRAZY_TIME_SOURCE_URL,
+            "source_ok": source_ok,
+            "source_error": source_error,
+            "source_lag_seconds": _time_lag_seconds(state.get("rows") or []),
+            "scraper_last_error": getattr(scraper, "last_error", None),
+            "scraper_last_rows_count": getattr(scraper, "last_rows_count", None),
+            "scraper_module": getattr(scraper, "__class__", type(scraper)).__module__,
+            "scraper_rows_count": len(state["rows"]),
+            # Backward compatibility key (old name), and new generic key.
+            "history_saved_6h_rows": saved_rows,
+            "history_saved_rows": saved_rows,
+            "last_poll": state["last_poll"].isoformat(),
+            "last_screenshot": state.get("last_screenshot"),
+            "new_rows_added": new_rows_added,
+            "tracked_rows": len(state["seen"]),
+            "latest_rows": rows_latest,
+            "source_latest_time": (rows_latest[0].get("time") if rows_latest else None),
+            "next_hot_signal": next_pick,
+            "hot_signals": hot_signals,
+            "mini_brains": mini_brains,
+            "prediction_accuracy": brain.get_prediction_accuracy(),
+            "session": brain.get_session_status(),
+            "live_statistics": live_statistics,
+        }
+
+    # Always return cached payload immediately if present.
+    with _public_lock:
+        cached = _public_cache.get("payload")
+        cached_ts = float(_public_cache.get("ts") or 0.0)
+
     now = datetime.utcnow()
-    should_poll = (now - state["last_poll"]).total_seconds() >= 6
-    parsed_rows: List[Dict[str, Any]] = state["rows"]
-    new_count = 0
-    source_ok = True
-    source_error = None
+    should_poll = (not state.get("rows")) or (now - state["last_poll"]).total_seconds() >= 1
+    can_refresh = _public_refresh_lock.acquire(blocking=False) if should_poll else False
 
-    if should_poll:
-        try:
-            fetched_rows = await _fetch_live_rows()
-            parsed_rows = _clean_rows(fetched_rows)
-            state["rows"] = parsed_rows
-            state["last_poll"] = now
-            if parsed_rows:
-                source_error = None
-        except Exception as exc:
-            source_ok = False
-            source_error = str(exc)
+    if should_poll and can_refresh:
+        async def _refresh_public_once():
+            source_ok_local = True
+            source_error_local: Optional[str] = None
+            new_count_local = 0
+            try:
+                is_bootstrap = len(state.get("seen") or set()) == 0
+                worker_limit = 40 if is_bootstrap else 25
+                payload = await asyncio.to_thread(_run_scrape_worker_fresh, worker_limit)
+                fetched_rows = payload.get("rows") or []
+                lag_seconds = _time_lag_seconds(fetched_rows)
+                parsed_rows = _clean_rows(fetched_rows)
 
-        for row in parsed_rows:
-            key = f"{row.get('time')}-{row.get('segment')}"
-            if key in state["seen"]:
-                continue
-            seg = row.get("segment")
-            if seg not in ALL_SEGMENTS:
-                continue
+                with _public_state_lock:
+                    state["last_screenshot"] = payload.get("screenshot")
+                    state["rows"] = parsed_rows
+                    state["last_poll"] = datetime.utcnow()
 
-            top = row.get("top_slot_multipliers") or []
-            if top:
-                brain.add_spin(segment=seg, multiplier=max(top), mult_segment=seg)
-            else:
-                brain.add_spin(segment=seg)
-            state["seen"].add(key)
-            new_count += 1
+                    if not parsed_rows:
+                        source_ok_local = False
+                        source_error_local = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
+                    else:
+                        source_error_local = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
 
-    hot_signals = brain.get_best_signals(4)
-    next_pick = hot_signals[0] if hot_signals else None
-    mini_brains = brain.get_all_brains_status()
+                    for row in _rows_oldest_first(parsed_rows):
+                        dt = str(row.get("datetime_text") or row.get("time") or "").strip().lower()
+                        slot = str(row.get("slot_result") or "").strip().lower()
+                        wheel = str(row.get("wheel_result") or "").strip().lower()
+                        mults = row.get("top_slot_multipliers") or []
+                        mult_sig = ",".join(str(x) for x in mults)
+                        key = f"{dt}|{slot}|{wheel}|{mult_sig}"
+                        if key in state["seen"]:
+                            continue
+                        wheel_seg = row.get("wheel_segment") or row.get("segment")
+                        slot_seg = row.get("slot_segment")
 
-    return {
-        "scraper_version": SCRAPER_VERSION,
-        "debug_now": datetime.utcnow().isoformat(),
-        "auto_mode": True,
-        "public_mode": True,
-        "poll_interval_seconds": 6,
-        "source_url": CRAZY_TIME_SOURCE_URL,
-        "source_ok": source_ok,
-        "source_error": source_error,
-        "scraper_rows_count": len(state["rows"]),
-        "last_poll": state["last_poll"].isoformat(),
-        "new_rows_added": new_count,
-        "tracked_rows": len(state["seen"]),
-        "latest_rows": list(reversed(state["rows"][-12:])),
-        "next_hot_signal": next_pick,
-        "hot_signals": hot_signals,
-        "mini_brains": mini_brains,
-        "session": brain.get_session_status(),
-    }
+                        if wheel_seg in ALL_SEGMENTS:
+                            top = row.get("top_slot_multipliers") or []
+                            bonus_data: Dict[str, Any] = {
+                                "slot_result": row.get("slot_result"),
+                                "wheel_result": row.get("wheel_result"),
+                                "slot_segment": slot_seg,
+                                "wheel_segment": wheel_seg,
+                                "top_slot_multipliers": top,
+                            }
+                            multiplier_to_send: Optional[int] = None
+                            if str(wheel_seg).isdigit():
+                                base = int(wheel_seg)
+                                bonus_data["base_wheel"] = base
+                                multiplier_to_send = max(top) if top else base
+                            else:
+                                multiplier_to_send = max(top) if top else None
+
+                            if multiplier_to_send is not None:
+                                brain.add_spin(segment=wheel_seg, multiplier=multiplier_to_send, mult_segment=wheel_seg, bonus_data=bonus_data)
+                            else:
+                                brain.add_spin(segment=wheel_seg, bonus_data=bonus_data)
+
+                        state["seen"].add(key)
+                        new_count_local += 1
+
+                    try:
+                        existing = _load_public_history()
+                        existing_keys = {str(x.get("key")) for x in existing if isinstance(x, dict)}
+                        now_ts = time.time()
+                        for row in parsed_rows:
+                            dt = str(row.get("datetime_text") or row.get("time") or "").strip().lower()
+                            slot = str(row.get("slot_result") or "").strip().lower()
+                            wheel = str(row.get("wheel_result") or "").strip().lower()
+                            mults = row.get("top_slot_multipliers") or []
+                            mult_sig = ",".join(str(x) for x in mults)
+                            k2 = f"{dt}|{slot}|{wheel}|{mult_sig}"
+                            if k2 in existing_keys:
+                                continue
+                            existing.append({"key": k2, "observed_at": now_ts, "row": row})
+                            existing_keys.add(k2)
+                        _save_public_history(existing)
+                    except Exception:
+                        pass
+
+                    try:
+                        _save_public_patterns(brain.pattern_engine.export_patterns())
+                    except Exception:
+                        pass
+
+                    payload_out_local = _build_payload(source_ok_local, source_error_local, new_count_local)
+                    if new_count_local > 0:
+                        try:
+                            await notify_hot_signals(payload_out_local.get("hot_signals") or [], source="public")
+                        except Exception:
+                            pass
+                    with _public_lock:
+                        _public_cache["payload"] = payload_out_local
+                        _public_cache["ts"] = time.time()
+            except Exception as e:
+                payload_out_local = _build_payload(False, str(e), 0)
+                with _public_lock:
+                    _public_cache["payload"] = payload_out_local
+                    _public_cache["ts"] = time.time()
+            finally:
+                _public_refresh_lock.release()
+
+        asyncio.create_task(_refresh_public_once())
+
+    if cached:
+        # Evita di servire cache vecchia quando la sorgente e' vuota/stale.
+        cache_age = time.time() - cached_ts
+        has_rows = bool((cached or {}).get("latest_rows"))
+        if cache_age <= 2.0 or has_rows:
+            return cached
+
+    # No cached data yet: return fast “empty but valid” payload; background thread will fill it.
+    return _build_payload(True, None, 0)
 
 
 @router.post("/session/start")

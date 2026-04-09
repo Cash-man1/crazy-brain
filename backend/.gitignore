@@ -1,41 +1,53 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+# Root gitignore
+# Backend
+backend/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+backend/*.so
+backend/.Python
+backend/build/
+backend/develop-eggs/
+backend/dist/
+backend/downloads/
+backend/eggs/
+backend/.eggs/
+backend/lib/
+backend/lib64/
+backend/parts/
+backend/sdist/
+backend/var/
+backend/wheels/
+backend/*.egg-info/
+backend/.installed.cfg
+backend/*.egg
+backend/venv/
+backend/ENV/
+backend/env/
+backend/.venv/
+backend/.env
+backend/.env.local
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+backend/crazybrain.db
+backend/mini_brain_learned.json
+backend/mini_brain_learned.json.tmp
 
-# Virtual Environment
-venv/
-ENV/
-env/
-.venv/
-
-# Environment Variables
-.env
-.env.local
-.env.*.local
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-crazybrain.db
+# Frontend
+frontend/node_modules/
+frontend/.pnp
+frontend/.pnp.js
+frontend/dist/
+frontend/dist-ssr/
+frontend/build/
+frontend/.env
+frontend/.env.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+frontend/coverage/
+frontend/*.tsbuildinfo
 
 # IDE
 .vscode/
@@ -48,14 +60,7 @@ crazybrain.db
 .DS_Store
 Thumbs.db
 
-# Logs
+# General
 *.log
 logs/
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Render
-.render-buildpacks/
+.cache/

@@ -38,7 +38,21 @@ class Settings(BaseSettings):
     APP_NAME: str = "Crazy Brain"
     APP_URL: str = "https://crazy-brain.it"
     FRONTEND_URL: str = "https://crazy-brain.it"
+    # Origini extra per CORS (es. sito statico Render), separate da virgola.
+    CORS_EXTRA_ORIGINS: str = ""
+    # Trusted hosts (CSV). In prod evita "*" (es. "api.crazy-brain.it,localhost,127.0.0.1,*.onrender.com")
+    ALLOWED_HOSTS: str = "*"
     ENVIRONMENT: str = "production"
+
+    # Notifiche segnali (Telegram / WhatsApp)
+    NOTIFY_SIGNALS_ENABLED: bool = False
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_BOT_USERNAME: str = ""
+    # Lista chat id separati da virgola (es. "12345678,-1001234567890")
+    TELEGRAM_CHAT_IDS: str = ""
+    TELEGRAM_WEBHOOK_SECRET_TOKEN: str = ""
+    # Soglia minima confidence per invio (0-1)
+    NOTIFY_MIN_CONFIDENCE: float = 0.45
     
     # Rate Limiting
     RATE_LIMIT_REGISTER: str = "5/minute"

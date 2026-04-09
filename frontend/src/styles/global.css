@@ -76,6 +76,37 @@ h1, h2, h3 {
   padding: 0 20px;
 }
 
+/* Dashboard live pubblico: usa tutta la larghezza utile (no fascia stretta centrale). */
+.container--live-full {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding-left: clamp(12px, 2vw, 28px);
+  padding-right: clamp(12px, 2vw, 28px);
+  box-sizing: border-box;
+}
+
+.dashboard--live-full {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.dashboard-content--live {
+  padding: 16px 0 28px;
+  max-width: none;
+}
+
+.dashboard--live-full .welcome-section {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.dashboard--live-full .welcome-section p {
+  max-width: none;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 /* Auth Pages Layout */
 .auth-page {
   min-height: 100vh;
@@ -727,6 +758,311 @@ h1, h2, h3 {
   color: #c8cde2;
   font-size: 0.85rem;
   margin-top: 4px;
+}
+
+/* Live dashboard pubblico (layout compatto desktop) */
+.live-welcome-tight {
+  margin-bottom: 20px !important;
+}
+
+.live-welcome-tight p {
+  font-size: 0.95rem;
+  max-width: 720px;
+}
+
+.live-stats-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.live-stats-select {
+  background: rgba(0, 0, 0, 0.45);
+  color: #e8eaf0;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  min-width: 200px;
+}
+
+.live-stats-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 22px;
+  margin: 10px 0 12px;
+  font-size: 0.84rem;
+  color: var(--gray-light);
+}
+
+.live-stats-kpis strong {
+  color: #fff;
+}
+
+.live-stats-table-wrap table {
+  font-size: 0.82rem;
+}
+
+.live-stats-table-wrap th,
+.live-stats-table-wrap td {
+  padding: 6px 8px;
+}
+
+.live-stats-legend {
+  margin: 12px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--gray);
+  opacity: 0.92;
+}
+
+.live-stats-legend strong {
+  color: var(--gray-light);
+}
+
+.live-public-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.live-top-row {
+  display: grid;
+  grid-template-columns: minmax(300px, 1.15fr) minmax(260px, 0.85fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+@media (max-width: 1100px) {
+  .live-top-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.live-panel {
+  background: rgba(18, 18, 18, 0.75);
+  border: 1px solid rgba(212, 175, 55, 0.18);
+  border-radius: 12px;
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+.live-panel-title {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+  color: var(--gray-light);
+}
+
+.live-panel-hint {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  opacity: 0.82;
+  line-height: 1.35;
+}
+
+/* Mini brains: larghezza minima carta ~240px così il testo non si schiaccia in una sola riga sottile */
+.live-mini-brains-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px 16px;
+  margin-bottom: 0;
+}
+
+.live-mini-panel .mini-brain-card {
+  padding: 12px 14px;
+  min-height: 0;
+}
+
+.live-mini-panel .mini-line {
+  font-size: 0.8rem;
+  margin-top: 5px;
+  line-height: 1.38;
+}
+
+.live-mini-panel .mini-top {
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+.live-mini-panel .mini-phase {
+  font-size: 0.78rem;
+}
+
+.live-mini-panel .mini-badge {
+  font-size: 0.95rem;
+}
+
+.live-outcomes-scroll {
+  max-height: min(38vh, 380px);
+  overflow-y: auto;
+  margin: 0 -6px;
+  padding: 0 6px;
+}
+
+.live-outcomes-scroll table {
+  font-size: 0.82rem;
+}
+
+.live-outcomes-scroll thead th {
+  position: sticky;
+  top: 0;
+  background: rgba(14, 14, 18, 0.96);
+  z-index: 1;
+  box-shadow: 0 1px 0 rgba(212, 175, 55, 0.12);
+}
+
+.live-outcomes-scroll .admin-users-table th,
+.live-outcomes-scroll .admin-users-table td {
+  padding: 6px 8px;
+}
+
+.live-hot-hero {
+  background: linear-gradient(145deg, rgba(30, 22, 8, 0.95), rgba(12, 14, 22, 0.98));
+  border: 1px solid rgba(255, 180, 60, 0.35);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 0 28px rgba(212, 175, 55, 0.12);
+}
+
+.live-hot-hero-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.live-hot-hero-head h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #ffd88a;
+  letter-spacing: 0.04em;
+}
+
+.live-hot-pill {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1a1206;
+  background: linear-gradient(90deg, #f4c76a, #e8a928);
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+
+.live-hot-sort-hint {
+  margin: -4px 0 12px;
+  font-size: 0.75rem;
+  color: var(--gray);
+  opacity: 0.9;
+}
+
+.live-hot-empty {
+  margin: 0;
+  padding: 14px;
+  text-align: center;
+  color: var(--gray);
+  font-size: 0.92rem;
+  border: 1px dashed rgba(212, 175, 55, 0.25);
+  border-radius: 10px;
+}
+
+.live-hot-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.live-hot-cards--column {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  max-width: 720px;
+}
+
+.live-hot-card {
+  flex: 1 1 200px;
+  min-width: 180px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 12px;
+  padding: 12px 14px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+}
+
+.live-hot-cards--column .live-hot-card {
+  flex: none;
+  width: 100%;
+  min-width: 0;
+}
+
+.live-hot-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.live-hot-rank {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #1a1206;
+  background: linear-gradient(145deg, #e8c06a, #c99530);
+  border-radius: 8px;
+}
+
+.live-hot-seg {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #fff;
+  padding: 4px 12px;
+  border-radius: 10px;
+}
+
+.live-hot-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 0.85rem;
+  color: #c8cde2;
+}
+
+.live-hot-meta strong {
+  color: #eef1ff;
+}
+
+.live-predictions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .live-predictions-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.live-predictions-grid .section-title {
+  font-size: 1rem;
+  margin-bottom: 8px;
+}
+
+.live-predictions-grid .status-card {
+  padding: 14px;
+}
+
+.live-predictions-grid .admin-users-table th,
+.live-predictions-grid .admin-users-table td {
+  padding: 7px 8px;
+  font-size: 0.88rem;
 }
 
 /* Footer */

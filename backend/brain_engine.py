@@ -4,6 +4,8 @@ Adattato per backend FastAPI
 """
 import json
 import math
+import os
+import random
 import statistics
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Tuple, Any, Set
@@ -63,6 +65,127 @@ TOTAL_WEIGHT = sum(WEIGHTS.values())
 THEORETICAL_PROBS = {seg: w / TOTAL_WEIGHT for seg, w in WEIGHTS.items()}
 EXPECTED_GAPS = {seg: 1 / p for seg, p in THEORETICAL_PROBS.items()}
 
+MINI_BRAIN_LEARNED_FILENAME = "mini_brain_learned.json"
+# Peso dei campioni vecchi nella media per il range (half-life in numero di colpi nella finestra).
+RANGE_LEARN_HALF_LIFE_SAMPLES = 6.0
+
+
+def mini_brain_learned_default_path() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), MINI_BRAIN_LEARNED_FILENAME)
+
+
+def weighted_mean_spins(samples: List[int], max_take: int = 15, half_life: float = RANGE_LEARN_HALF_LIFE_SAMPLES) -> float:
+    """Media pesata: i colpi piu recenti pesano di piu (decadimento esponenziale)."""
+    if not samples:
+        return 0.0
+    recent = samples[-max_take:]
+    n = len(recent)
+    wsum = 0.0
+    tsum = 0.0
+    for i, x in enumerate(recent):
+        age = (n - 1 - i)
+        w = 0.5 ** (age / half_life)
+        wsum += w * float(x)
+        tsum += w
+    return wsum / tsum if tsum > 0 else float(statistics.mean(recent))
+
+
+def wilson_ci_95(successes: int, attempts: int) -> Optional[Tuple[float, float]]:
+    """Intervallo Wilson al 95% per proporzione (None se attempts==0)."""
+    if attempts <= 0:
+        return None
+    z = 1.96
+    p = successes / attempts
+    denom = 1.0 + z * z / attempts
+    center = (p + z * z / (2 * attempts)) / denom
+    margin = z * math.sqrt(max(0.0, p * (1 - p) / attempts + z * z / (4 * attempts * attempts))) / denom
+    return (max(0.0, center - margin), min(1.0, center + margin))
+
+
+def calibration_attack_vs_independent_spins(
+    segment: str,
+    attempts: int,
+    successes: int,
+    range_max: int,
+    n_sims: int = 400,
+) -> Dict[str, Any]:
+    """
+    Modello nullo: ogni 'attacco' = fino a R spin indipendenti con p teorica del segmento.
+    MC leggero (solo se attempts non enorme) + z-score binomiale.
+    """
+    p = float(THEORETICAL_PROBS.get(segment, 0) or 0)
+    R = max(1, min(int(range_max) if range_max else 9, 20))
+    p_win = 1.0 - (1.0 - p) ** R if p < 1.0 else 1.0
+    out: Dict[str, Any] = {
+        "segment": segment,
+        "attempts": attempts,
+        "successes": successes,
+        "range_used": R,
+        "p_win_null": round(p_win, 6),
+        "observed_rate": None,
+        "null_expected_rate": round(p_win, 4),
+        "z_score_vs_null": None,
+        "mc_p_ge_observed": None,
+        "label": "pochi dati",
+    }
+    if attempts < 1:
+        return out
+    obs = successes / attempts
+    out["observed_rate"] = round(obs, 4)
+    if attempts < 3:
+        return out
+    mu = attempts * p_win
+    var = max(1e-12, attempts * p_win * (1.0 - p_win))
+    z = (successes - mu) / math.sqrt(var)
+    out["z_score_vs_null"] = round(z, 3)
+    rng = random.Random((hash(segment) & 0xFFFFFFFF) ^ (attempts << 8) ^ successes)
+    sim_cap = min(max(200, n_sims), 320)
+    att_mc = min(attempts, 28)
+    if att_mc >= 1:
+        succ_thr = successes if att_mc == attempts else min(
+            att_mc, max(0, (successes * att_mc + attempts // 2) // attempts)
+        )
+        ge = 0
+        for _ in range(sim_cap):
+            w = sum(1 for _ in range(att_mc) if rng.random() < p_win)
+            if w >= succ_thr:
+                ge += 1
+        out["mc_p_ge_observed"] = round(ge / sim_cap, 4)
+    else:
+        out["mc_p_ge_observed"] = None
+    pge = out["mc_p_ge_observed"]
+    if attempts < 5:
+        out["label"] = "pochi dati"
+    elif z < 0.5 and (pge is None or pge > 0.22):
+        out["label"] = "compatibile con caso"
+    elif z < 1.5:
+        out["label"] = "debole"
+    elif z < 2.5:
+        out["label"] = "moderato"
+    else:
+        out["label"] = "sopra il caso"
+    return out
+
+
+def mini_brain_effective_confidence(state: "MiniBrainState") -> float:
+    """Riduce la confidence mostrata/usata se mancano dati (anti overconfidence)."""
+    raw = float(state.confidence)
+    n_att = int(state.attempts)
+    n_lr = len(state.learned_hit_spins)
+    cap = 0.40 + 0.55 * min(1.0, n_att / 12.0) * min(1.0, n_lr / 8.0)
+    cap = min(0.92, max(0.28, cap))
+    return round(min(raw, cap), 4)
+
+
+def meta_dynamic_min_confidence(state: "MiniBrainState") -> float:
+    """Soglia minima piu alta con pochi tentativi o pochi campioni sul range."""
+    base = 0.30
+    if state.attempts < 5:
+        base += 0.06
+    if len(state.learned_hit_spins) < 4:
+        base += 0.05
+    return min(0.52, base)
+
 
 # =============================================================================
 # DATA CLASSES
@@ -114,6 +237,10 @@ class MiniBrainState:
     ev_current: float = 0.0
     range_max: int = 0
     range_current: int = 0
+    attack_start_spin: int = 0
+    # Giri dall'inizio attacco all'uscita del segmento (solo hit in fase attacco/confermato), per adattare il range.
+    learned_hit_spins: List[int] = field(default_factory=list)
+    learned_last_update: Optional[str] = None
 
 
 @dataclass
@@ -160,6 +287,11 @@ class PatternRecognitionEngine:
     
     def record_transition(self, from_seg: str, to_seg: str):
         """Registra una transizione tra segmenti"""
+        # Defensive against deserialized plain dicts (after import) that may miss defaultdict behavior.
+        if from_seg not in self.data.transition_matrix or not isinstance(self.data.transition_matrix[from_seg], dict):
+            self.data.transition_matrix[from_seg] = defaultdict(int)
+        if to_seg not in self.data.transition_matrix[from_seg]:
+            self.data.transition_matrix[from_seg][to_seg] = 0
         self.data.transition_matrix[from_seg][to_seg] += 1
         self.data.total_transitions += 1
         self.recent_sequence.append(to_seg)
@@ -170,13 +302,16 @@ class PatternRecognitionEngine:
         """Aggiorna probabilità condizionali P(A|B)"""
         if self.data.total_transitions < self.MIN_SAMPLES:
             return
-        
+        new_strength: Dict[str, float] = {}
         for from_seg in ALL_SEGMENTS:
-            total_from = sum(self.data.transition_matrix[from_seg].values())
+            row_obj = self.data.transition_matrix.get(from_seg, {})
+            if not isinstance(row_obj, dict):
+                row_obj = {}
+            total_from = sum(int(v) for v in row_obj.values() if isinstance(v, (int, float)))
             if total_from > 0:
                 self.data.bigram_probs[from_seg] = {}
                 for to_seg in ALL_SEGMENTS:
-                    count = self.data.transition_matrix[from_seg][to_seg]
+                    count = int(row_obj.get(to_seg, 0))
                     empirical_prob = count / total_from
                     theoretical_prob = THEORETICAL_PROBS[to_seg]
                     
@@ -186,9 +321,11 @@ class PatternRecognitionEngine:
                         if deviation > self.SIGNIFICANCE_THRESHOLD:
                             strength = min(1.0, (deviation - 1) / 2)
                             pattern_key = f"{from_seg}->{to_seg}"
-                            self.data.pattern_strength[pattern_key] = strength
+                            new_strength[pattern_key] = strength
                         
                         self.data.bigram_probs[from_seg][to_seg] = empirical_prob
+        # Rebuild completo: i pattern non piu significativi vengono rimossi.
+        self.data.pattern_strength = new_strength
     
     def _detect_sequences(self):
         """Rileva sequenze di lunghezza 2-3"""
@@ -325,8 +462,8 @@ class EVEngine:
         else:
             adjusted_prob = base_prob
         
-        # Aggiusta con confidence del mini brain
-        confidence_factor = mini_brain.confidence
+        # Aggiusta con confidence del mini brain (versione conservativa con pochi dati)
+        confidence_factor = mini_brain_effective_confidence(mini_brain)
         adjusted_prob = adjusted_prob * (1 + confidence_factor * 0.5)
         
         # Cap probabilità a valori ragionevoli
@@ -390,13 +527,21 @@ class BankrollEngine:
         """
         if self.session.bankroll_current <= 0:
             return []
+
+        # Defensive: avoid division by zero / invalid ranges.
+        try:
+            range_estimate = int(range_estimate)
+        except Exception:
+            range_estimate = 1
+        if range_estimate <= 0:
+            range_estimate = 1
         
         bankroll = self.session.bankroll_current
         max_risk = bankroll * self.MAX_RISK_PERCENT
         max_spin = bankroll * self.MAX_SPIN_PERCENT
         
         # Payout-aware base stake
-        payout = PAYOUTS[segment]
+        payout = PAYOUTS.get(segment, 0)
         if payout > 0:
             # Per numeri, stake inversamente proporzionale al payout
             base_unit = max_risk / (range_estimate * payout)
@@ -408,7 +553,7 @@ class BankrollEngine:
         ev_factor = max(0.5, min(2.0, 1 + ev))
         base_unit *= ev_factor
         
-        steps = min(range_estimate, 8)
+        steps = min(max(range_estimate, 1), 8)
         stakes = []
         current = base_unit
         
@@ -503,10 +648,18 @@ class MiniBrain:
         if self.state.phase in [Phase.ATTACCO, Phase.CONFERMATO]:
             self.state.successes += 1
             self.state.signal = SignalType.SUCCESSO
+            # Impara quanti giri sono serviti (range_current = miss dopo ingresso; +1 include il giro di hit).
+            spins_to_hit = self.state.range_current + 1
+            if 1 <= spins_to_hit <= 30:
+                self.state.learned_hit_spins.append(spins_to_hit)
+                if len(self.state.learned_hit_spins) > 40:
+                    self.state.learned_hit_spins = self.state.learned_hit_spins[-40:]
+                self.state.learned_last_update = datetime.now().isoformat()
         
         # Reset fase
         self.state.phase = Phase.APPRENDIMENTO
         self.state.range_current = 0
+        self.state.attack_start_spin = 0
         self.state.battery = max(20, self.state.battery - 30)  # Scarica dopo hit
     
     def _handle_miss(self, spin_count: int):
@@ -527,9 +680,9 @@ class MiniBrain:
         self.state.battery = min(100, self.state.battery + charge)
         
         # Gestione fasi
-        self._update_phase()
+        self._update_phase(spin_count)
     
-    def _update_phase(self):
+    def _update_phase(self, spin_count: int):
         """Aggiorna fase in base alle condizioni"""
         if self.state.phase == Phase.APPRENDIMENTO:
             if self.state.battery >= 60 and self.state.cooldown <= 0:
@@ -538,7 +691,7 @@ class MiniBrain:
         
         elif self.state.phase == Phase.ATTENZIONE:
             if self.state.battery >= 80 and self.state.confidence > 0.4:
-                self._enter_attack()
+                self._enter_attack(spin_count)
         
         elif self.state.phase in [Phase.ATTACCO, Phase.CONFERMATO]:
             self.state.range_current += 1
@@ -548,12 +701,28 @@ class MiniBrain:
                 self.state.phase = Phase.STOP
                 self.state.signal = SignalType.STOP
     
-    def _enter_attack(self):
+    def _base_range_max(self) -> int:
+        return 6 if self.segment == "CT" else 9
+
+    def _adapt_range_max_from_learning(self) -> int:
+        """Abbassa (o rialza dentro il tetto) il range in base alla media dei giri fino all'hit in attacco."""
+        base = self._base_range_max()
+        samples = self.state.learned_hit_spins
+        if len(samples) < 3:
+            return base
+        mean_spins = weighted_mean_spins(samples, max_take=15, half_life=RANGE_LEARN_HALF_LIFE_SAMPLES)
+        # Piccolo margine sopra la media osservata (non stringere troppo al primo colpo).
+        target = int(math.ceil(mean_spins + 0.75))
+        floor_r = 3 if self.segment == "CT" else 4
+        return max(floor_r, min(base, target))
+
+    def _enter_attack(self, spin_count: int):
         """Entra in fase di attacco"""
         self.state.phase = Phase.ATTACCO
         self.state.signal = SignalType.ENTRA
         self.state.range_current = 0
-        self.state.range_max = 6 if self.segment == "CT" else 9
+        self.state.range_max = self._adapt_range_max_from_learning()
+        self.state.attack_start_spin = spin_count
         self.state.attempts += 1
         
         # Verifica se diventa CONFERMATO
@@ -614,10 +783,19 @@ class MiniBrain:
     
     def get_status(self) -> Dict:
         """Restituisce stato completo"""
+        att = int(self.state.attempts)
+        succ = int(self.state.successes)
+        n_lr = len(self.state.learned_hit_spins)
+        eff_conf = mini_brain_effective_confidence(self.state)
+        ci = wilson_ci_95(succ, att) if att > 0 else None
+        cal = calibration_attack_vs_independent_spins(
+            self.segment, att, succ, self.state.range_max or self._base_range_max()
+        )
         return {
             "segment": self.segment,
             "phase": self.state.phase.value,
-            "confidence": self.state.confidence,
+            "confidence": eff_conf,
+            "confidence_raw": self.state.confidence,
             "battery": round(self.state.battery, 2),
             "gap_current": self.state.gap_current,
             "expected_gap": round(self.expected_gap, 2),
@@ -626,7 +804,14 @@ class MiniBrain:
             "z_score": round(self.state.z_score, 3),
             "cooldown": round(self.state.cooldown, 2),
             "range": f"{self.state.range_current}/{self.state.range_max}",
-            "success_rate": round(self.state.successes / self.state.attempts, 3) if self.state.attempts > 0 else 0,
+            "success_rate": round(succ / att, 3) if att > 0 else 0,
+            "attack_attempts": att,
+            "attack_successes": succ,
+            "attack_success_ci95": [round(ci[0], 3), round(ci[1], 3)] if ci else None,
+            "attack_data_sparse": att < 5,
+            "range_samples_n": n_lr,
+            "learned_last_update": self.state.learned_last_update,
+            "calibration_vs_null": cal,
             "signal": self.state.signal.value,
             "ev": self.state.ev_current
         }
@@ -680,15 +865,17 @@ class MetaBrain:
                 confidence=0.0
             )
         
-        # Filtra per confidence minima
+        # Filtra per confidence minima (soglia dinamica + confidence efficace)
         candidates = []
         for seg, ev in positive_ev.items():
             brain = self.mini_brains[seg]
-            if brain.state.confidence >= self.MIN_CONFIDENCE:
+            eff_c = mini_brain_effective_confidence(brain.state)
+            need = max(self.MIN_CONFIDENCE, meta_dynamic_min_confidence(brain.state))
+            if eff_c >= need:
                 candidates.append({
                     "segment": seg,
                     "ev": ev,
-                    "confidence": brain.state.confidence,
+                    "confidence": eff_c,
                     "phase": brain.state.phase,
                     "range_max": brain.state.range_max
                 })
@@ -698,11 +885,32 @@ class MetaBrain:
                 action="WAIT",
                 reason="EV positivi ma confidence insufficiente",
                 ev=max(positive_ev.values()),
-                confidence=max(self.mini_brains[s].state.confidence for s in positive_ev.keys())
+                confidence=max(
+                    mini_brain_effective_confidence(self.mini_brains[s].state) for s in positive_ev.keys()
+                )
             )
         
-        # Ordina per EV (principale) e confidence (secondario)
-        candidates.sort(key=lambda x: (x["ev"], x["confidence"]), reverse=True)
+        # Ordina con score composito (piu stabile/preciso): EV + confidence + fase.
+        phase_bonus = {
+            Phase.CONFERMATO: 0.15,
+            Phase.ATTACCO: 0.10,
+            Phase.ATTENZIONE: 0.03,
+            Phase.APPRENDIMENTO: 0.0,
+            Phase.STOP: -0.10,
+            Phase.SUCCESSO: 0.05,
+        }
+        for c in candidates:
+            seg = c["segment"]
+            pattern_bonus = 0.0
+            if self.last_segment:
+                pattern_bonus = self.pattern_engine.get_pattern_influence(self.last_segment, seg) * 0.12
+            c["score"] = (
+                (c["ev"] * 0.7)
+                + (c["confidence"] * 0.3)
+                + phase_bonus.get(c["phase"], 0.0)
+                + pattern_bonus
+            )
+        candidates.sort(key=lambda x: (x["score"], x["ev"], x["confidence"]), reverse=True)
         best = candidates[0]
         
         # Calcola stakes
@@ -754,8 +962,9 @@ class BrainEngine:
     Coordina tutti i componenti e fornisce API pubblica.
     """
     
-    def __init__(self, username: str = "player"):
+    def __init__(self, username: str = "player", mini_brain_learned_path: Optional[str] = None):
         self.username = username
+        self._mini_brain_learned_path = mini_brain_learned_path or mini_brain_learned_default_path()
         
         # Componenti persistenti (pattern)
         self.pattern_engine = PatternRecognitionEngine()
@@ -772,9 +981,23 @@ class BrainEngine:
         self.history: deque = deque(maxlen=1000)
         self.last30: deque = deque(maxlen=30)
         self.session_active = False
-        
+        # Statistiche "selettive": solo hot in attacco / meta PLAY, con finestra a range (tentativi pochi).
+        self.prediction_stats: Dict[str, Dict[str, int]] = {
+            seg: {"attempts": 0, "hits": 0} for seg in ALL_SEGMENTS
+        }
+        # Statistiche "continue": ogni giro una sola previsione top (max EV) → ~1 tentativo per giro, stima più rapida.
+        self.prediction_stats_continuous: Dict[str, Dict[str, int]] = {
+            seg: {"attempts": 0, "hits": 0} for seg in ALL_SEGMENTS
+        }
+        # Se True, get_prediction_accuracy usa by_segment dalle stats continue; sempre esposte anche quelle selettive.
+        self.enable_continuous_prediction_stats: bool = False
+        # Predizione "attiva": conta 1 tentativo per chiamata (range), non per giro.
+        # {segment: str, expires_spin: int} dove expires_spin è incluso (>= spin_count) per cui la chiamata è valida.
+        self._pending_prediction: Optional[Dict[str, Any]] = None
+
         # Inizializza MiniBrains
         self._init_mini_brains()
+        self._load_mini_brain_learned()
     
     def _init_mini_brains(self):
         """Inizializza i 8 MiniBrains"""
@@ -788,6 +1011,58 @@ class BrainEngine:
             self.bankroll_engine,
             self.pattern_engine
         )
+
+    def _load_mini_brain_learned(self):
+        """Ripristina solo i campioni per il range adattivo (persistenza tra riavvii)."""
+        path = self._mini_brain_learned_path
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return
+        segs = data.get("segments") or {}
+        for seg, brain in self.mini_brains.items():
+            row = segs.get(seg)
+            if not isinstance(row, dict):
+                continue
+            lh = row.get("learned_hit_spins")
+            if isinstance(lh, list):
+                cleaned: List[int] = []
+                for x in lh[-40:]:
+                    try:
+                        xi = int(x)
+                        if 1 <= xi <= 30:
+                            cleaned.append(xi)
+                    except Exception:
+                        pass
+                brain.state.learned_hit_spins = cleaned
+            lu = row.get("learned_last_update")
+            if isinstance(lu, str):
+                brain.state.learned_last_update = lu
+
+    def _persist_mini_brain_learned(self):
+        path = self._mini_brain_learned_path
+        payload: Dict[str, Any] = {
+            "version": 1,
+            "saved_at": datetime.utcnow().isoformat(),
+            "segments": {},
+        }
+        for seg, brain in self.mini_brains.items():
+            payload["segments"][seg] = {
+                "learned_hit_spins": list(brain.state.learned_hit_spins),
+                "learned_last_update": brain.state.learned_last_update,
+            }
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                if os.path.isfile(tmp):
+                    os.remove(tmp)
+            except Exception:
+                pass
     
     # =========================================================================
     # API SESSIONE
@@ -799,9 +1074,13 @@ class BrainEngine:
         self.history.clear()
         self.last30.clear()
         self.session_active = True
-        
-        # Reset MiniBrains (ma mantieni pattern)
+        self.prediction_stats = {seg: {"attempts": 0, "hits": 0} for seg in ALL_SEGMENTS}
+        self.prediction_stats_continuous = {seg: {"attempts": 0, "hits": 0} for seg in ALL_SEGMENTS}
+        self._pending_prediction = None
+
+        # Reset MiniBrains (ma mantieni pattern); ripristina campioni range da disco
         self._init_mini_brains()
+        self._load_mini_brain_learned()
         
         # Start bankroll
         self.bankroll_engine.start_session(bankroll)
@@ -821,6 +1100,17 @@ class BrainEngine:
             "patterns_learned": len(self.pattern_engine.data.pattern_strength)
         }
     
+    def _continuous_best_segment(self) -> Optional[str]:
+        """Una previsione per giro: segmento con EV massima (stato pre-esito)."""
+        if not self.meta_brain:
+            return None
+        self.meta_brain.evaluate(self.spin_count)
+        evs = getattr(self.meta_brain, "evs", None) or {}
+        if not evs:
+            return None
+        best_seg = max(evs.items(), key=lambda kv: (kv[1], kv[0]))[0]
+        return best_seg if best_seg in ALL_SEGMENTS else None
+
     # =========================================================================
     # API SPIN
     # =========================================================================
@@ -836,8 +1126,45 @@ class BrainEngine:
         """
         if not self.session_active:
             raise ValueError("Sessione non attiva. Chiama start_session() prima.")
-        
+
+        predicted_top: Optional[str] = None
+        predicted_range: Optional[int] = None
+        if self.meta_brain:
+            hot = self.get_best_signals(1)
+            if hot:
+                predicted_top = hot[0].get("segment")
+                try:
+                    predicted_range = int(hot[0].get("range_remaining")) if hot[0].get("range_remaining") is not None else None
+                except Exception:
+                    predicted_range = None
+            else:
+                pre_dec = self.meta_brain.evaluate(self.spin_count)
+                if pre_dec.action == "PLAY" and pre_dec.segment:
+                    predicted_top = pre_dec.segment
+                    predicted_range = None
+
+        pred_continuous: Optional[str] = None
+        if self.enable_continuous_prediction_stats:
+            pred_continuous = self._continuous_best_segment()
+
         self.spin_count += 1
+
+        if pred_continuous and pred_continuous in ALL_SEGMENTS:
+            self.prediction_stats_continuous[pred_continuous]["attempts"] += 1
+
+        # Scadenza chiamata precedente (se il range è finito, azzera).
+        if self._pending_prediction and isinstance(self._pending_prediction.get("expires_spin"), int):
+            if self.spin_count > int(self._pending_prediction["expires_spin"]):
+                self._pending_prediction = None
+
+        # Se la previsione è cambiata (o non c'era), apri una nuova "chiamata" e conta 1 tentativo.
+        # Nota: range_remaining = 2 significa valida per questo giro e i prossimi 2 giri => expires = spin_count + 2
+        if predicted_top and predicted_top in ALL_SEGMENTS:
+            current_seg = (self._pending_prediction or {}).get("segment")
+            if current_seg != predicted_top:
+                self.prediction_stats[predicted_top]["attempts"] += 1
+                expires_spin = self.spin_count + max(int(predicted_range or 0), 0)
+                self._pending_prediction = {"segment": predicted_top, "expires_spin": expires_spin}
         
         # Processa Top Slot se presente
         top_slot_impact = None
@@ -884,6 +1211,17 @@ class BrainEngine:
         
         # Ottieni decisione
         decision = self.meta_brain.evaluate(self.spin_count)
+
+        # Se c'è una chiamata attiva e il segmento esce dentro il range => 1 hit e chiudi la chiamata.
+        if self._pending_prediction and self._pending_prediction.get("segment") == segment:
+            if segment in self.prediction_stats:
+                self.prediction_stats[segment]["hits"] += 1
+            self._pending_prediction = None
+
+        if pred_continuous and pred_continuous == segment and pred_continuous in self.prediction_stats_continuous:
+            self.prediction_stats_continuous[pred_continuous]["hits"] += 1
+        
+        self._persist_mini_brain_learned()
         
         return {
             "spin": self.spin_count,
@@ -921,19 +1259,48 @@ class BrainEngine:
             "alternatives": decision.alternatives
         }
     
+    def get_prediction_accuracy(self) -> Dict[str, Any]:
+        """Per ogni segmento: tentativi/indovinati; modalità continua = 1 pick/giro (max EV), selettiva = hot/meta."""
+        def _pack(stats: Dict[str, Dict[str, int]]) -> Dict[str, Any]:
+            out: Dict[str, Any] = {}
+            for seg in ALL_SEGMENTS:
+                a = int(stats[seg]["attempts"])
+                h = int(stats[seg]["hits"])
+                out[seg] = {
+                    "attempts": a,
+                    "hits": h,
+                    "rate": (h / a) if a else None,
+                }
+            return out
+
+        primary = self.prediction_stats_continuous if self.enable_continuous_prediction_stats else self.prediction_stats
+        return {
+            "by_segment": _pack(primary),
+            "by_segment_selective": _pack(self.prediction_stats),
+            "spin_count": self.spin_count,
+            "primary_mode": "continuous" if self.enable_continuous_prediction_stats else "selective",
+        }
+
     def get_best_signals(self, top_n: int = 3) -> List[Dict]:
         """Restituisce i migliori segnali attivi"""
         signals = []
         
         for seg, brain in self.mini_brains.items():
             if brain.state.phase in [Phase.ATTACCO, Phase.CONFERMATO]:
-                remaining = brain.state.range_max - brain.state.range_current
+                if brain.state.attack_start_spin > 0:
+                    elapsed = max(0, self.spin_count - brain.state.attack_start_spin)
+                    progress = max(brain.state.range_current, elapsed)
+                else:
+                    progress = brain.state.range_current
+                remaining = max(0, brain.state.range_max - progress)
                 stakes = self.bankroll_engine.calculate_stakes(seg, brain.state.ev_current, brain.state.range_max)
                 
+                eff_c = mini_brain_effective_confidence(brain.state)
                 signals.append({
                     "segment": seg,
                     "phase": brain.state.phase.value,
-                    "confidence": brain.state.confidence,
+                    "confidence": eff_c,
+                    "confidence_raw": brain.state.confidence,
                     "ev": brain.state.ev_current,
                     "range_remaining": remaining,
                     "battery": brain.state.battery,

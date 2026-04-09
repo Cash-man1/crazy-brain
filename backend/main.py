@@ -19,6 +19,8 @@ from api_auth import router as auth_router
 from api_stripe import router as stripe_router
 from api_brain import router as brain_router
 from api_admin import router as admin_router
+from api_chat import router as chat_router
+from api_notify import router as notify_router
 from config import VIP_USERS
 
 settings = get_settings()
@@ -103,9 +105,16 @@ async def security_headers_middleware(request: Request, call_next):
 
 # ================= CORS =================
 
+def _split_csv(raw: str) -> list[str]:
+    return [x.strip() for x in (raw or "").split(",") if x.strip()]
+
+cors_origins = [settings.FRONTEND_URL, "http://localhost:5173"]
+cors_origins += _split_csv(getattr(settings, "CORS_EXTRA_ORIGINS", ""))
+cors_origins = list(dict.fromkeys([o for o in cors_origins if o]))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:5173"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -116,7 +125,7 @@ app.add_middleware(
 
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["*", "localhost", "127.0.0.1"]
+    allowed_hosts=_split_csv(getattr(settings, "ALLOWED_HOSTS", "*")) or ["*"]
 )
 
 
@@ -204,6 +213,8 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(stripe_router, prefix="/api")
 app.include_router(brain_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(chat_router, prefix="/api")
+app.include_router(notify_router, prefix="/api")
 
 
 # ================= START =================

@@ -38,6 +38,11 @@ class User(Base):
     uuid = Column(String(36), unique=True, index=True, default=lambda: str(uuid.uuid4()))
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
+    phone_number = Column(String(32), unique=True, index=True, nullable=True)
+    telegram_chat_id = Column(String(64), unique=True, index=True, nullable=True)
+    notify_enabled = Column(Boolean, default=False)
+    # CSV dei segmenti (es. "1,2,CT"); vuoto => tutti.
+    notify_segments = Column(String(128), nullable=True)
     
     role = Column(String(20), default="user")
     is_active = Column(Boolean, default=True)
@@ -67,6 +72,10 @@ class User(Base):
             "id": self.id,
             "uuid": self.uuid,
             "email": self.email,
+            "phone_number": self.phone_number,
+            "telegram_connected": bool(self.telegram_chat_id),
+            "notify_enabled": bool(self.notify_enabled),
+            "notify_segments": self.notify_segments or "",
             "role": self.role,
             "is_active": self.is_active,
             "is_verified": self.is_verified,
@@ -120,6 +129,66 @@ class LoginAttempt(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class PhoneOtpToken(Base):
+    __tablename__ = "phone_otp_tokens"
+
+    id = Column(Integer, primary_key=True)
+    phone_number = Column(String(32), index=True, nullable=False)
+    code_hash = Column(String(255), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+    attempts = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def is_valid(self) -> bool:
+        return (not self.used) and datetime.utcnow() < self.expires_at
+
+
+class PhoneTelegramLink(Base):
+    """
+    Mappa numero -> telegram_chat_id.
+    Serve per OTP via Telegram anche prima della creazione account.
+    """
+    __tablename__ = "phone_telegram_links"
+
+    id = Column(Integer, primary_key=True)
+    phone_number = Column(String(32), unique=True, index=True, nullable=False)
+    telegram_chat_id = Column(String(64), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PhoneTelegramLinkToken(Base):
+    """
+    Token temporaneo per collegare Telegram ad un numero PRIMA del login/account.
+    L'utente fa /start <token> sul bot → webhook salva la mappa.
+    """
+    __tablename__ = "phone_telegram_link_tokens"
+
+    id = Column(Integer, primary_key=True)
+    phone_number = Column(String(32), index=True, nullable=False)
+    token_hash = Column(String(255), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def is_valid(self) -> bool:
+        return (not self.used) and datetime.utcnow() < self.expires_at
+
+
+class TelegramLinkToken(Base):
+    __tablename__ = "telegram_link_tokens"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    token_hash = Column(String(255), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def is_valid(self) -> bool:
+        return (not self.used) and datetime.utcnow() < self.expires_at
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
@@ -151,6 +220,11 @@ async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
 
 async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[User]:
     result = await db.execute(select(User).where(User.id == user_id))
+    return result.scalar_one_or_none()
+
+
+async def get_user_by_phone(db: AsyncSession, phone_number: str) -> Optional[User]:
+    result = await db.execute(select(User).where(User.phone_number == phone_number))
     return result.scalar_one_or_none()
 
 
