@@ -295,10 +295,44 @@ async def refresh_public_cache_once() -> None:
             _public_cache["payload"] = payload_out_local
             _public_cache["ts"] = time.time()
     except Exception as e:
-        # Non far crashare il loop
+        # Non far crashare il loop, ma esponi l'errore nel payload
         try:
+            state_last_poll = None
+            try:
+                state_last_poll = state.get("last_poll").isoformat() if isinstance(state.get("last_poll"), datetime) else None
+            except Exception:
+                state_last_poll = None
+            err_payload: Dict[str, Any] = {
+                "scraper_version": SCRAPER_VERSION,
+                "debug_now": datetime.utcnow().isoformat(),
+                "auto_mode": True,
+                "public_mode": True,
+                "poll_interval_seconds": 1,
+                "source_url": CRAZY_TIME_SOURCE_URL,
+                "source_ok": False,
+                "source_error": f"{type(e).__name__}: {str(e)}",
+                "source_lag_seconds": None,
+                "scraper_last_error": getattr(scraper, "last_error", None),
+                "scraper_last_rows_count": getattr(scraper, "last_rows_count", None),
+                "scraper_module": getattr(scraper, "__class__", type(scraper)).__module__,
+                "scraper_rows_count": len((state.get("rows") or []) if isinstance(state.get("rows"), list) else []),
+                "history_saved_6h_rows": len(_load_public_history()),
+                "history_saved_rows": len(_load_public_history()),
+                "last_poll": state_last_poll or datetime.utcnow().isoformat(),
+                "last_screenshot": state.get("last_screenshot") if isinstance(state, dict) else None,
+                "new_rows_added": 0,
+                "tracked_rows": len(state.get("seen") or set()) if isinstance(state.get("seen"), set) else 0,
+                "latest_rows": _rows_latest_first(state.get("rows") or [])[:60] if isinstance(state.get("rows"), list) else [],
+                "source_latest_time": None,
+                "next_hot_signal": None,
+                "hot_signals": [],
+                "mini_brains": brain.get_all_brains_status() if brain else {},
+                "prediction_accuracy": brain.get_prediction_accuracy() if brain else {},
+                "session": brain.get_session_status() if brain else {},
+                "live_statistics": {},
+            }
             with _public_lock:
-                _public_cache["payload"] = None
+                _public_cache["payload"] = err_payload
                 _public_cache["ts"] = time.time()
         except Exception:
             pass
