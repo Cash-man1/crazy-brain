@@ -42,7 +42,7 @@ def _run_scrape_worker(limit: int = 60) -> Dict[str, Any]:
         "--limit",
         str(limit),
         "--screenshot-prefix",
-        "",
+        "cronologia",
     ]
     timeout_sec = 30 if limit <= 120 else 50
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
@@ -1113,11 +1113,17 @@ async def auto_brain_public():
         # Evita di servire cache vecchia quando la sorgente e' vuota/stale.
         cache_age = time.time() - cached_ts
         has_rows = bool((cached or {}).get("latest_rows"))
-        if cache_age <= 2.0 or has_rows:
+        # Se abbiamo righe, serviamo la cache; se non abbiamo righe, serviamo comunque la cache
+        # perché contiene lo stato più recente (inclusi eventuali errori di scrape).
+        if has_rows or cache_age <= 2.0:
             return cached
+        return cached
 
     # No cached data yet: return fast “empty but valid” payload; background thread will fill it.
-    return _build_payload(True, None, 0)
+    # Importante: se non abbiamo righe, non segnare la fonte come OK.
+    # Mostra un messaggio utile in UI mentre il refresh in background prova a riempire la cache.
+    fallback_err = getattr(scraper, "last_error", None) or "Inizializzazione sorgente in corso..."
+    return _build_payload(False, fallback_err, 0)
 
 
 @router.post("/session/start")
