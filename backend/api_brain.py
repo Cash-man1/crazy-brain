@@ -137,6 +137,207 @@ _public_inflight = False
 _public_state_lock = threading.Lock()
 _public_bootstrapped = False
 _public_refresh_lock = threading.Lock()
+_public_ingestion_task: Optional[asyncio.Task] = None
+
+
+async def refresh_public_cache_once() -> None:
+    """
+    Esegue un refresh della cache/stato pubblico come fa l'endpoint /auto-brain-public,
+    ma utilizzabile anche da un loop in background (startup).
+    """
+    user_id = PUBLIC_GUEST_ID
+    brain = get_or_create_session(user_id)
+    if not brain.session_active:
+        brain.start_session(100.0)
+
+    state = auto_state.setdefault(
+        user_id,
+        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": []}
+    )
+
+    # Evita refresh concorrenti
+    if not _public_refresh_lock.acquire(blocking=False):
+        return
+
+    try:
+        is_bootstrap = len(state.get("seen") or set()) == 0
+        worker_limit = 40 if is_bootstrap else 25
+        payload = await asyncio.to_thread(_run_scrape_worker_fresh, worker_limit)
+        fetched_rows = payload.get("rows") or []
+        lag_seconds = _time_lag_seconds(fetched_rows)
+        parsed_rows = _clean_rows(fetched_rows)
+
+        source_ok_local = True
+        source_error_local: Optional[str] = None
+        new_count_local = 0
+
+        with _public_state_lock:
+            state["last_screenshot"] = payload.get("screenshot")
+            state["rows"] = parsed_rows
+            state["last_poll"] = datetime.utcnow()
+
+            if not parsed_rows:
+                source_ok_local = False
+                source_error_local = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
+            else:
+                source_error_local = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
+
+            for row in _rows_oldest_first(parsed_rows):
+                dt = str(row.get("datetime_text") or row.get("time") or "").strip().lower()
+                slot = str(row.get("slot_result") or "").strip().lower()
+                wheel = str(row.get("wheel_result") or "").strip().lower()
+                mults = row.get("top_slot_multipliers") or []
+                mult_sig = ",".join(str(x) for x in mults)
+                key = f"{dt}|{slot}|{wheel}|{mult_sig}"
+                if key in state["seen"]:
+                    continue
+                wheel_seg = row.get("wheel_segment") or row.get("segment")
+                slot_seg = row.get("slot_segment")
+
+                if wheel_seg in ALL_SEGMENTS:
+                    top = row.get("top_slot_multipliers") or []
+                    bonus_data: Dict[str, Any] = {
+                        "slot_result": row.get("slot_result"),
+                        "wheel_result": row.get("wheel_result"),
+                        "slot_segment": slot_seg,
+                        "wheel_segment": wheel_seg,
+                        "top_slot_multipliers": top,
+                    }
+                    multiplier_to_send: Optional[int] = None
+                    if str(wheel_seg).isdigit():
+                        base = int(wheel_seg)
+                        bonus_data["base_wheel"] = base
+                        multiplier_to_send = max(top) if top else base
+                    else:
+                        multiplier_to_send = max(top) if top else None
+
+                    if multiplier_to_send is not None:
+                        brain.add_spin(segment=wheel_seg, multiplier=multiplier_to_send, mult_segment=wheel_seg, bonus_data=bonus_data)
+                    else:
+                        brain.add_spin(segment=wheel_seg, bonus_data=bonus_data)
+
+                state["seen"].add(key)
+                new_count_local += 1
+
+        # Persist + cache payload
+        try:
+            existing = _load_public_history()
+            existing_keys = {str(x.get("key")) for x in existing if isinstance(x, dict)}
+            now_ts = time.time()
+            for row in parsed_rows:
+                dt = str(row.get("datetime_text") or row.get("time") or "").strip().lower()
+                slot = str(row.get("slot_result") or "").strip().lower()
+                wheel = str(row.get("wheel_result") or "").strip().lower()
+                mults = row.get("top_slot_multipliers") or []
+                mult_sig = ",".join(str(x) for x in mults)
+                k2 = f"{dt}|{slot}|{wheel}|{mult_sig}"
+                if k2 in existing_keys:
+                    continue
+                existing.append({"key": k2, "observed_at": now_ts, "row": row})
+                existing_keys.add(k2)
+            _save_public_history(existing)
+        except Exception:
+            pass
+
+        try:
+            _save_public_patterns(brain.pattern_engine.export_patterns())
+        except Exception:
+            pass
+
+        # Build payload using the same logic as endpoint.
+        def _build_payload_local(source_ok: bool, source_error: Optional[str], new_rows_added: int) -> Dict[str, Any]:
+            hot_signals = brain.get_best_signals(4)
+            next_pick = hot_signals[0] if hot_signals else None
+            mini_brains = brain.get_all_brains_status()
+            rows_latest = _rows_latest_first(state["rows"])[:600]
+            saved_rows = len(_load_public_history())
+            chrono = _rows_oldest_first(state.get("rows") or [])
+            live_statistics = compute_live_window_stats(chrono, ALL_SEGMENTS, THEORETICAL_PROBS)
+            live_statistics["brain_spins_recorded"] = brain.spin_count
+            live_statistics["persisted_file_rows"] = saved_rows
+            return {
+                "scraper_version": SCRAPER_VERSION,
+                "debug_now": datetime.utcnow().isoformat(),
+                "auto_mode": True,
+                "public_mode": True,
+                "poll_interval_seconds": 1,
+                "source_url": CRAZY_TIME_SOURCE_URL,
+                "source_ok": source_ok,
+                "source_error": source_error,
+                "source_lag_seconds": _time_lag_seconds(state.get("rows") or []),
+                "scraper_last_error": getattr(scraper, "last_error", None),
+                "scraper_last_rows_count": getattr(scraper, "last_rows_count", None),
+                "scraper_module": getattr(scraper, "__class__", type(scraper)).__module__,
+                "scraper_rows_count": len(state["rows"]),
+                "history_saved_6h_rows": saved_rows,
+                "history_saved_rows": saved_rows,
+                "last_poll": state["last_poll"].isoformat(),
+                "last_screenshot": state.get("last_screenshot"),
+                "new_rows_added": new_rows_added,
+                "tracked_rows": len(state["seen"]),
+                "latest_rows": rows_latest,
+                "source_latest_time": (rows_latest[0].get("time") if rows_latest else None),
+                "next_hot_signal": next_pick,
+                "hot_signals": hot_signals,
+                "mini_brains": mini_brains,
+                "prediction_accuracy": brain.get_prediction_accuracy(),
+                "session": brain.get_session_status(),
+                "live_statistics": live_statistics,
+            }
+
+        payload_out_local = _build_payload_local(source_ok_local, source_error_local, new_count_local)
+        if new_count_local > 0:
+            try:
+                await notify_hot_signals(payload_out_local.get("hot_signals") or [], source="public")
+            except Exception:
+                pass
+        with _public_lock:
+            _public_cache["payload"] = payload_out_local
+            _public_cache["ts"] = time.time()
+    except Exception as e:
+        # Non far crashare il loop
+        try:
+            with _public_lock:
+                _public_cache["payload"] = None
+                _public_cache["ts"] = time.time()
+        except Exception:
+            pass
+    finally:
+        try:
+            _public_refresh_lock.release()
+        except Exception:
+            pass
+
+
+async def _public_ingestion_loop() -> None:
+    while True:
+        try:
+            await refresh_public_cache_once()
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
+        await asyncio.sleep(1.0)
+
+
+def start_public_ingestion_loop() -> None:
+    global _public_ingestion_task
+    if _public_ingestion_task and not _public_ingestion_task.done():
+        return
+    _public_ingestion_task = asyncio.create_task(_public_ingestion_loop())
+
+
+async def stop_public_ingestion_loop() -> None:
+    global _public_ingestion_task
+    t = _public_ingestion_task
+    _public_ingestion_task = None
+    if not t:
+        return
+    t.cancel()
+    try:
+        await t
+    except Exception:
+        pass
 
 PUBLIC_HISTORY_FILE = Path(__file__).resolve().parent / "public_history.json"
 PUBLIC_PATTERNS_FILE = Path(__file__).resolve().parent / "public_patterns.json"

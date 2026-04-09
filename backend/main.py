@@ -18,6 +18,7 @@ from security import limiter
 from api_auth import router as auth_router
 from api_stripe import router as stripe_router
 from api_brain import router as brain_router
+from api_brain import start_public_ingestion_loop, stop_public_ingestion_loop
 from api_admin import router as admin_router
 from api_chat import router as chat_router
 from api_notify import router as notify_router
@@ -52,10 +53,21 @@ async def lifespan(app: FastAPI):
         )
     
     logger.info("Application started successfully!")
+
+    # Start live ingestion in background (Render/prod).
+    try:
+        start_public_ingestion_loop()
+        logger.info("Public ingestion loop started")
+    except Exception:
+        logger.exception("Failed starting ingestion loop")
     
     yield
     
     logger.info("Shutting down...")
+    try:
+        await stop_public_ingestion_loop()
+    except Exception:
+        pass
 
 
 app = FastAPI(
