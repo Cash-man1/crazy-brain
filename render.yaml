@@ -29,7 +29,6 @@ services:
 
   - type: web
     name: crazy-brain-web
-    region: frankfurt
     plan: free
     runtime: static
     rootDir: frontend
