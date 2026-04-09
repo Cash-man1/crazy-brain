@@ -3,8 +3,6 @@ import { Link } from 'react-router-dom'
 
 const API_CANDIDATES = [
   import.meta.env.VITE_API_URL,
-  'http://127.0.0.1:8011',
-  'http://localhost:8011',
 ].filter(Boolean) as string[]
 
 const segmentColor: Record<string, string> = {
