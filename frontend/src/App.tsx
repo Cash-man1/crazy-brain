@@ -26,7 +26,10 @@ function App() {
     <div className="app">
       <Routes>
         <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />} />
-        <Route path="/dashboard" element={<LiveDashboardNoAuth />} />
+        <Route
+          path="/dashboard"
+          element={user ? <LiveDashboardNoAuth /> : <Navigate to="/login" replace />}
+        />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />

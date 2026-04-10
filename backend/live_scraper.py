@@ -107,7 +107,7 @@ class CasinoScoresScraper:
             str(DEFAULT_WINDOW_SIZE[1]),
         ]
         # Worker prints JSON to stdout
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=70)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"Worker failed rc={proc.returncode}")
         payload = json.loads(proc.stdout)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Brain } from 'lucide-react'
 import LegalFooter from '../components/LegalFooter'
 import { useAuth } from '../context/AuthContext'
@@ -36,6 +36,7 @@ const instagramHref = INSTAGRAM_URL || 'https://www.instagram.com/'
 
 export default function LiveDashboardNoAuth() {
   const { user, logout } = useAuth()
+  const navigate = useNavigate()
   const [data, setData] = useState<any>(null)
   const [error, setError] = useState('')
   const [apiBase, setApiBase] = useState('')
@@ -185,7 +186,10 @@ export default function LiveDashboardNoAuth() {
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      onClick={() => logout()}
+                      onClick={() => {
+                        logout()
+                        navigate('/login', { replace: true })
+                      }}
                     >
                       Esci
                     </button>

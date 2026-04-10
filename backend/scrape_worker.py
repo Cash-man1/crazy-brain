@@ -39,7 +39,8 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         )
         page = ctx.new_page()
         _log("page goto started")
-        page.goto(CRAZY_TIME_URL, wait_until="networkidle", timeout=45000)
+        # networkidle spesso non termina mai su siti con analytics/websocket → timeout subprocess.
+        page.goto(CRAZY_TIME_URL, wait_until="domcontentloaded", timeout=60000)
         _log("page goto finished")
         try:
             page.wait_for_selector("table", timeout=20000)

@@ -33,7 +33,7 @@ SCRAPER_VERSION = "2026-04-01-v4"
 SCRAPE_WORKER = Path(__file__).resolve().parent / "scrape_worker.py"
 WORKER_PYTHON = Path(__file__).resolve().parent.parent / ".venv" / "Scripts" / "python.exe"
 MAX_ALLOWED_SOURCE_LAG_SECONDS = 20
-SCRAPE_RETRY_ATTEMPTS = 1
+SCRAPE_RETRY_ATTEMPTS = 2
 SOURCE_FAILURE_THRESHOLD = 3
 
 
@@ -47,8 +47,8 @@ def _run_scrape_worker(limit: int = 60) -> Dict[str, Any]:
         "--screenshot-prefix",
         "cronologia",
     ]
-    # Render can be slower with Playwright startup/network; avoid killing the worker too early.
-    timeout_sec = 70 if limit <= 120 else 90
+    # Render Free tier + Chromium cold start: networkidle can exceed 70s; keep headroom.
+    timeout_sec = 120 if limit <= 120 else 150
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"worker rc={proc.returncode}")
