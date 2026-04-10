@@ -65,11 +65,13 @@ def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
     best_rows: List[Dict[str, Any]] = []
     best_lag: Optional[int] = None
 
+    last_worker_error: Optional[str] = None
     for _ in range(max(1, SCRAPE_RETRY_ATTEMPTS)):
         try:
             payload = _run_scrape_worker(limit=limit)
-        except Exception:
-            payload = {"rows": [], "screenshot": None}
+        except Exception as exc:
+            last_worker_error = f"{type(exc).__name__}: {str(exc)}"
+            payload = {"rows": [], "screenshot": None, "_worker_debug": last_worker_error}
         rows = payload.get("rows") or []
         lag = _time_lag_seconds(rows)
 
@@ -82,16 +84,35 @@ def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
             return payload
 
     # 2) Solo se worker non produce righe utili, fallback HTML diretto.
+    last_html_error: Optional[str] = None
     if best_payload is None or not (best_payload.get("rows") or []):
         try:
             rows_html = _fetch_live_rows_sync()[:limit]
             if rows_html:
                 return {"rows": rows_html, "screenshot": None}
-        except Exception:
-            pass
+        except Exception as exc:
+            last_html_error = f"{type(exc).__name__}: {str(exc)}"
 
     if best_payload is None:
-        return {"rows": []}
+        diag = "No rows from worker or HTML fallback"
+        if last_worker_error:
+            diag += f" | worker={last_worker_error}"
+        if last_html_error:
+            diag += f" | html={last_html_error}"
+        return {"rows": [], "_worker_debug": diag}
+
+    # Keep diagnostics even when payload is empty so API can expose root cause.
+    if not (best_payload.get("rows") or []):
+        diag = str(best_payload.get("_worker_debug") or "").strip()
+        if not diag:
+            parts: List[str] = []
+            if last_worker_error:
+                parts.append(f"worker={last_worker_error}")
+            if last_html_error:
+                parts.append(f"html={last_html_error}")
+            diag = " | ".join(parts)
+        if diag:
+            best_payload["_worker_debug"] = diag
     return best_payload
 
 
