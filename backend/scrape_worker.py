@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -13,6 +14,23 @@ from playwright.sync_api import sync_playwright
 
 CRAZY_TIME_URL = "https://www.casino.org/casinoscores/it/crazy-time/"
 DEFAULT_SCREENSHOT_DIR = Path(__file__).resolve().parent / "screenshots"
+
+
+def _trim_screenshot_dir(directory: Path, keep: int) -> None:
+    """Mantiene solo gli ultimi `keep` PNG (per disco). I dati gioco sono già in `extracted` / JSON."""
+    if keep < 1:
+        return
+    try:
+        if not directory.is_dir():
+            return
+        files = sorted(directory.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in files[keep:]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
 
 
 def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window_pos: Tuple[int, int], window_size: Tuple[int, int]):
@@ -489,23 +507,32 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         print(f"ROWS TROVATE: {len(extracted)}", file=sys.stderr, flush=True)
         if extracted:
             print(f"PRIMA RIGA: {extracted[0]}", file=sys.stderr, flush=True)
-            try:
-                page.screenshot(path="/tmp/debug_success.png", full_page=False)
-            except Exception:
-                pass
-        else:
-            try:
-                page.screenshot(path="/tmp/debug_failure.png", full_page=False)
-            except Exception:
-                pass
 
-        # Always keep a Render debug screenshot.
-        try:
-            page.screenshot(path="/tmp/debug.png", full_page=False)
-        except Exception:
-            pass
+        # Screenshot /tmp opzionali (default: off — non servono al "cervello", solo debug manuale).
+        tmp_debug = os.getenv("SCRAPER_TMP_DEBUG", "").strip().lower() in ("1", "true", "yes")
+        if tmp_debug:
+            if extracted:
+                try:
+                    page.screenshot(path="/tmp/debug_success.png", full_page=False)
+                except Exception:
+                    pass
+            else:
+                try:
+                    page.screenshot(path="/tmp/debug_failure.png", full_page=False)
+                except Exception:
+                    pass
+            try:
+                page.screenshot(path="/tmp/debug.png", full_page=False)
+            except Exception:
+                pass
 
         shot: Optional[str] = None
+        keep_shots = 3
+        try:
+            keep_shots = max(1, int(os.getenv("SCRAPER_SCREENSHOT_KEEP", "3")))
+        except ValueError:
+            keep_shots = 3
+
         if screenshot_prefix:
             DEFAULT_SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
             ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -521,6 +548,8 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
                     page.screenshot(path=shot, full_page=False)
                 except Exception:
                     shot = None
+            if shot:
+                _trim_screenshot_dir(DEFAULT_SCREENSHOT_DIR, keep_shots)
 
         try:
             ctx.close()
