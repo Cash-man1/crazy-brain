@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 import re
 import httpx
@@ -30,6 +30,17 @@ router = APIRouter(prefix="/brain", tags=["Crazy Time Tool"])
 logger = logging.getLogger(__name__)
 CRAZY_TIME_SOURCE_URL = "https://www.casino.org/casinoscores/it/crazy-time/"
 SCRAPER_VERSION = "2026-04-01-v4"
+
+
+def _iso_utc_z(dt: Optional[datetime] = None) -> str:
+    """ISO-8601 UTC con suffisso Z (evita ambiguità nel browser)."""
+    if dt is None:
+        dt = datetime.now(timezone.utc)
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
 SCRAPE_WORKER = Path(__file__).resolve().parent / "scrape_worker.py"
 WORKER_PYTHON = Path(__file__).resolve().parent.parent / ".venv" / "Scripts" / "python.exe"
 MAX_ALLOWED_SOURCE_LAG_SECONDS = 20
@@ -282,7 +293,7 @@ async def refresh_public_cache_once() -> None:
             live_statistics["persisted_file_rows"] = saved_rows
             return {
                 "scraper_version": SCRAPER_VERSION,
-                "debug_now": datetime.utcnow().isoformat(),
+                "debug_now": _iso_utc_z(),
                 "auto_mode": True,
                 "public_mode": True,
                 "poll_interval_seconds": 1,
@@ -296,7 +307,7 @@ async def refresh_public_cache_once() -> None:
                 "scraper_rows_count": len(state["rows"]),
                 "history_saved_6h_rows": saved_rows,
                 "history_saved_rows": saved_rows,
-                "last_poll": state["last_poll"].isoformat(),
+                "last_poll": _iso_utc_z(state["last_poll"]),
                 "last_screenshot": state.get("last_screenshot"),
                 "new_rows_added": new_rows_added,
                 "tracked_rows": len(state["seen"]),
@@ -325,12 +336,12 @@ async def refresh_public_cache_once() -> None:
         try:
             state_last_poll = None
             try:
-                state_last_poll = state.get("last_poll").isoformat() if isinstance(state.get("last_poll"), datetime) else None
+                state_last_poll = _iso_utc_z(state.get("last_poll")) if isinstance(state.get("last_poll"), datetime) else None
             except Exception:
                 state_last_poll = None
             err_payload: Dict[str, Any] = {
                 "scraper_version": SCRAPER_VERSION,
-                "debug_now": datetime.utcnow().isoformat(),
+                "debug_now": _iso_utc_z(),
                 "auto_mode": True,
                 "public_mode": True,
                 "poll_interval_seconds": 1,
@@ -344,7 +355,7 @@ async def refresh_public_cache_once() -> None:
                 "scraper_rows_count": len((state.get("rows") or []) if isinstance(state.get("rows"), list) else []),
                 "history_saved_6h_rows": len(_load_public_history()),
                 "history_saved_rows": len(_load_public_history()),
-                "last_poll": state_last_poll or datetime.utcnow().isoformat(),
+                "last_poll": state_last_poll or _iso_utc_z(),
                 "last_screenshot": state.get("last_screenshot") if isinstance(state, dict) else None,
                 "new_rows_added": 0,
                 "tracked_rows": len(state.get("seen") or set()) if isinstance(state.get("seen"), set) else 0,
@@ -927,7 +938,7 @@ async def auto_brain_status(
 
     return {
         "scraper_version": SCRAPER_VERSION,
-        "debug_now": datetime.utcnow().isoformat(),
+        "debug_now": _iso_utc_z(),
         "auto_mode": True,
         "poll_interval_seconds": 2,
         "source_url": CRAZY_TIME_SOURCE_URL,
@@ -937,7 +948,7 @@ async def auto_brain_status(
         "scraper_last_error": getattr(scraper, "last_error", None),
         "scraper_last_rows_count": getattr(scraper, "last_rows_count", None),
         "scraper_module": getattr(scraper, "__class__", type(scraper)).__module__,
-        "last_poll": state["last_poll"].isoformat(),
+        "last_poll": _iso_utc_z(state["last_poll"]),
         "last_screenshot": state.get("last_screenshot"),
         "new_rows_added": new_count,
         "tracked_rows": len(state["seen"]),
@@ -1026,7 +1037,7 @@ async def auto_brain_public():
         live_statistics["persisted_file_rows"] = saved_rows
         return {
             "scraper_version": SCRAPER_VERSION,
-            "debug_now": datetime.utcnow().isoformat(),
+            "debug_now": _iso_utc_z(),
             "auto_mode": True,
             "public_mode": True,
             "poll_interval_seconds": 1,
@@ -1041,7 +1052,7 @@ async def auto_brain_public():
             # Backward compatibility key (old name), and new generic key.
             "history_saved_6h_rows": saved_rows,
             "history_saved_rows": saved_rows,
-            "last_poll": state["last_poll"].isoformat(),
+            "last_poll": _iso_utc_z(state["last_poll"]),
             "last_screenshot": state.get("last_screenshot"),
             "new_rows_added": new_rows_added,
             "tracked_rows": len(state["seen"]),
@@ -1192,7 +1203,11 @@ async def auto_brain_public():
     # No cached data yet: return fast “empty but valid” payload; background thread will fill it.
     # Importante: se non abbiamo righe, non segnare la fonte come OK.
     # Mostra un messaggio utile in UI mentre il refresh in background prova a riempire la cache.
-    fallback_err = getattr(scraper, "last_error", None) or "Inizializzazione sorgente in corso..."
+    fallback_err = getattr(scraper, "last_error", None) or (
+        "Avvio: cache pubblica in caricamento (pochi secondi). "
+        "Se resta vuoto, controlla log API (Playwright/timeout). "
+        f"Ora server UTC: {_iso_utc_z()}"
+    )
     return _build_payload(False, fallback_err, 0)
 
 

@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     APP_URL: str = "https://crazy-brain.it"
     FRONTEND_URL: str = "https://crazy-brain.it"
     # Origini extra per CORS (es. sito statico Render), separate da virgola.
-    CORS_EXTRA_ORIGINS: str = ""
+    # Default: frontend Render; sovrascrivibile da env.
+    CORS_EXTRA_ORIGINS: str = "https://crazy-brain-web.onrender.com"
     # Trusted hosts (CSV). In prod evita "*" (es. "api.crazy-brain.it,localhost,127.0.0.1,*.onrender.com")
     ALLOWED_HOSTS: str = "*"
     ENVIRONMENT: str = "production"

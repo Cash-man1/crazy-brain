@@ -20,10 +20,11 @@ services:
     envVars:
       - key: ENVIRONMENT
         value: production
+      # URL del sito statico: necessario per CORS (login/Telegram dal browser).
       - key: FRONTEND_URL
-        sync: false
+        value: https://crazy-brain-web.onrender.com
       - key: CORS_EXTRA_ORIGINS
-        sync: false
+        value: https://crazy-brain-web.onrender.com
       - key: SECRET_KEY
         generateValue: true
       # Login admin via telefono (POST /api/auth/phone/login): imposta nel pannello Render.

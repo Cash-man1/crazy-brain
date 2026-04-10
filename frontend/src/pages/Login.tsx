@@ -6,6 +6,17 @@ import LegalFooter from '../components/LegalFooter'
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-api.onrender.com'
 
+function mapFetchError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e)
+  if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('Load failed')) {
+    return (
+      'Connessione al server non riuscita (spesso CORS o API offline). ' +
+      'Su Render: imposta CORS_EXTRA_ORIGINS con l’URL del sito statico, oppure riprova tra poco.'
+    )
+  }
+  return msg
+}
+
 export default function Login() {
   const { loading, error } = useAuth()
   const navigate = useNavigate()
@@ -33,8 +44,8 @@ export default function Login() {
       const data = await res.json()
       if (!res.ok) throw new Error(data?.detail || data?.message || 'OTP request failed')
       setOtpSent(true)
-    } catch (e: any) {
-      setOtpError(e?.message || 'OTP request failed')
+    } catch (e: unknown) {
+      setOtpError(mapFetchError(e))
     } finally {
       setOtpLoading(false)
     }
@@ -52,8 +63,8 @@ export default function Login() {
       const data = await res.json()
       if (!res.ok) throw new Error(data?.detail || data?.message || 'Link failed')
       setTgLink(String(data.connect_url || ''))
-    } catch (e: any) {
-      setOtpError(e?.message || 'Link failed')
+    } catch (e: unknown) {
+      setOtpError(mapFetchError(e))
     } finally {
       setOtpLoading(false)
     }
@@ -74,8 +85,8 @@ export default function Login() {
       if (!res.ok) throw new Error(data?.detail || data?.message || 'Register failed')
       localStorage.setItem('token', data.access_token)
       window.location.href = '/dashboard'
-    } catch (e: any) {
-      setOtpError(e?.message || 'Register failed')
+    } catch (e: unknown) {
+      setOtpError(mapFetchError(e))
     } finally {
       setOtpLoading(false)
     }
@@ -95,8 +106,8 @@ export default function Login() {
       if (!res.ok) throw new Error(data?.detail || data?.message || 'Login failed')
       localStorage.setItem('token', data.access_token)
       window.location.href = '/dashboard'
-    } catch (e: any) {
-      setOtpError(e?.message || 'Login failed')
+    } catch (e: unknown) {
+      setOtpError(mapFetchError(e))
     } finally {
       setOtpLoading(false)
     }

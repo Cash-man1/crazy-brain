@@ -4,6 +4,7 @@ import { Brain } from 'lucide-react'
 import LegalFooter from '../components/LegalFooter'
 import { useAuth } from '../context/AuthContext'
 import { INSTAGRAM_URL } from '../config/social'
+import { formatItalyFromBackendIso } from '../lib/formatTime'
 
 const API_CANDIDATES = [
   import.meta.env.VITE_API_URL,
@@ -228,7 +229,12 @@ export default function LiveDashboardNoAuth() {
                 <div className="description">tracked_rows: {data.tracked_rows ?? 0}</div>
                 <div className="description">ultima ora sorgente: {data.source_latest_time ?? '--'}</div>
                 <div className="description">ritardo sorgente: {data.source_lag_seconds != null ? `${Math.round(data.source_lag_seconds)}s` : '--'}</div>
-                <div className="description">last_poll: {data.last_poll || '--'}</div>
+                <div className="description">
+                  Ultimo poll (Italia): {formatItalyFromBackendIso(data.last_poll)}
+                </div>
+                <div className="description" style={{ opacity: 0.85, fontSize: '0.85rem' }}>
+                  UTC tecnico: {data.last_poll || '--'}
+                </div>
                 <div className="description">errore: {data.source_error || 'nessuno'}</div>
                 <button
                   type="button"
