@@ -7,11 +7,8 @@ import LegalFooter from '../components/LegalFooter'
 const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-api.onrender.com'
 
 export default function Login() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const { login, loading, error } = useAuth()
+  const { loading, error } = useAuth()
   const navigate = useNavigate()
-  const [mode, setMode] = useState<'email' | 'phone'>('email')
   const [phoneMode, setPhoneMode] = useState<'register' | 'login'>('register')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [otpCode, setOtpCode] = useState('')
@@ -22,15 +19,7 @@ export default function Login() {
   const [otpSent, setOtpSent] = useState(false)
   const [tgLink, setTgLink] = useState('')
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    try {
-      await login(email, password)
-      navigate('/dashboard')
-    } catch {
-      // Error handled by context
-    }
-  }
+  // login email rimosso: usiamo solo telefono + password
 
   const requestOtp = async () => {
     setOtpLoading(true)
@@ -122,7 +111,7 @@ export default function Login() {
           <div className="logo-section">
             <Brain className="brain-icon" />
             <h1>Crazy Brain</h1>
-            <p>Accedi al tool — email oppure telefono + Telegram (OTP)</p>
+            <p>Accedi o crea account con numero di telefono + Telegram (OTP)</p>
           </div>
 
           {(error || otpError) && (
@@ -132,85 +121,33 @@ export default function Login() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-            <button
-              type="button"
-              className={`btn ${mode === 'email' ? 'btn-primary' : ''}`}
-              style={{ flex: 1, padding: '10px 12px' }}
-              onClick={() => setMode('email')}
-              disabled={loading || otpLoading}
-            >
-              Email
-            </button>
-            <button
-              type="button"
-              className={`btn ${mode === 'phone' ? 'btn-primary' : ''}`}
-              style={{ flex: 1, padding: '10px 12px' }}
-              onClick={() => setMode('phone')}
-              disabled={loading || otpLoading}
-            >
-              Telefono (OTP)
-            </button>
-          </div>
+          <div>
+            <div className="description" style={{ marginBottom: 10 }}>
+              Telegram è obbligatorio per ricevere l’OTP. Premere START sul bot <strong>non</strong> attiva le notifiche segnali.
+            </div>
 
-          {mode === 'email' ? (
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label className="form-label">Email</label>
-                <input
-                  type="email"
-                  className="form-input"
-                  placeholder="La tua email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Password</label>
-                <input
-                  type="password"
-                  className="form-input"
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-
-              <button type="submit" className="btn btn-primary" disabled={loading}>
-                {loading ? <span className="spinner" /> : 'Accedi'}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <button
+                type="button"
+                className={`btn ${phoneMode === 'register' ? 'btn-primary' : ''}`}
+                style={{ flex: 1, padding: '10px 12px' }}
+                onClick={() => setPhoneMode('register')}
+                disabled={otpLoading}
+              >
+                Crea account
               </button>
-            </form>
-          ) : (
-            <div>
-              <div className="description" style={{ marginBottom: 10 }}>
-                Telegram è obbligatorio per ricevere l’OTP. Premere START sul bot <strong>non</strong> attiva le notifiche segnali.
-              </div>
+              <button
+                type="button"
+                className={`btn ${phoneMode === 'login' ? 'btn-primary' : ''}`}
+                style={{ flex: 1, padding: '10px 12px' }}
+                onClick={() => setPhoneMode('login')}
+                disabled={otpLoading}
+              >
+                Accedi
+              </button>
+            </div>
 
-              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                <button
-                  type="button"
-                  className={`btn ${phoneMode === 'register' ? 'btn-primary' : ''}`}
-                  style={{ flex: 1, padding: '10px 12px' }}
-                  onClick={() => setPhoneMode('register')}
-                  disabled={otpLoading}
-                >
-                  Crea account
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${phoneMode === 'login' ? 'btn-primary' : ''}`}
-                  style={{ flex: 1, padding: '10px 12px' }}
-                  onClick={() => setPhoneMode('login')}
-                  disabled={otpLoading}
-                >
-                  Accedi
-                </button>
-              </div>
-
-              <form onSubmit={phoneMode === 'register' ? registerWithOtp : phoneLogin}>
+            <form onSubmit={phoneMode === 'register' ? registerWithOtp : phoneLogin}>
               <div className="form-group">
                 <label className="form-label">Numero di telefono</label>
                 <input
@@ -272,7 +209,7 @@ export default function Login() {
                     <input
                       type="password"
                       className="form-input"
-                      placeholder="Create password"
+                      placeholder="Crea una password"
                       value={phonePassword}
                       onChange={(e) => setPhonePassword(e.target.value)}
                       required
@@ -315,28 +252,13 @@ export default function Login() {
                 </>
               )}
             </form>
-            </div>
-          )}
+          </div>
 
-          {mode === 'email' ? (
-            <div className="auth-links">
-              <Link to="/forgot-password" className="auth-link">
-                Password dimenticata (email)
-              </Link>
-              <Link to="/register" className="auth-link gold">
-                Non hai un account? Registrati con email
-              </Link>
-            </div>
-          ) : (
-            <div className="auth-links">
-              <Link to="/phone-forgot-password" className="auth-link">
-                Password dimenticata (telefono)
-              </Link>
-              <Link to="/register" className="auth-link gold">
-                Preferisci solo email? Registrati qui
-              </Link>
-            </div>
-          )}
+          <div className="auth-links">
+            <Link to="/phone-forgot-password" className="auth-link">
+              Password dimenticata (telefono)
+            </Link>
+          </div>
         </div>
 
         <LegalFooter />
