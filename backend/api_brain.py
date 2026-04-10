@@ -48,7 +48,11 @@ def _run_scrape_worker(limit: int = 60) -> Dict[str, Any]:
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"worker rc={proc.returncode}")
-    return json.loads(proc.stdout)
+    payload = json.loads(proc.stdout)
+    debug_stderr = (proc.stderr or "").strip()
+    if debug_stderr:
+        payload["_worker_debug"] = debug_stderr[-2000:]
+    return payload
 
 
 def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
@@ -178,7 +182,9 @@ async def refresh_public_cache_once() -> None:
 
             if not parsed_rows:
                 source_ok_local = False
-                source_error_local = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
+                worker_dbg = str(payload.get("_worker_debug") or "").strip()
+                base_msg = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
+                source_error_local = f"{base_msg}. Worker: {worker_dbg}" if worker_dbg else base_msg
             else:
                 source_error_local = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
 
@@ -795,7 +801,9 @@ async def auto_brain_status(
             state["last_poll"] = now
             if not parsed_rows:
                 source_ok = False
-                source_error = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
+                worker_dbg = str(payload.get("_worker_debug") or "").strip()
+                base_msg = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
+                source_error = f"{base_msg}. Worker: {worker_dbg}" if worker_dbg else base_msg
             else:
                 source_error = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
         except Exception as exc:
@@ -1025,7 +1033,9 @@ async def auto_brain_public():
 
                     if not parsed_rows:
                         source_ok_local = False
-                        source_error_local = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
+                        worker_dbg = str(payload.get("_worker_debug") or "").strip()
+                        base_msg = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
+                        source_error_local = f"{base_msg}. Worker: {worker_dbg}" if worker_dbg else base_msg
                     else:
                         source_error_local = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
 
