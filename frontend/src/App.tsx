@@ -7,12 +7,25 @@ import ResetPassword from './pages/ResetPassword'
 import ChatLive from './pages/ChatLive'
 import ConnectTelegram from './pages/ConnectTelegram'
 import PhoneForgotPassword from './pages/PhoneForgotPassword'
+import { useAuth } from './context/AuthContext'
 
 function App() {
+  const { user, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="app">
+        <div className="container" style={{ padding: 24, color: '#c8cde2' }}>
+          Caricamento…
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       <Routes>
-        <Route path="/" element={<LiveDashboardNoAuth />} />
+        <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />} />
         <Route path="/dashboard" element={<LiveDashboardNoAuth />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
