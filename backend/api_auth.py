@@ -16,6 +16,7 @@ from database import (
 from security import (
     verify_password, get_password_hash, create_access_token, create_refresh_token,
     validate_password, get_client_ip, generate_password_reset_token, hash_token,
+    generate_secure_token,
     limiter, get_current_user_id
 )
 from config import get_settings, VIP_USERS

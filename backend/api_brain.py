@@ -393,7 +393,8 @@ async def _public_ingestion_loop(initial_delay_seconds: float = 0.0) -> None:
             break
         except Exception:
             pass
-        await asyncio.sleep(1.0)
+        # Evita di accodare scrape troppo ravvicinati (RAM su Render Free).
+        await asyncio.sleep(3.0)
 
 
 def start_public_ingestion_loop(initial_delay_seconds: float = 0.0) -> None:

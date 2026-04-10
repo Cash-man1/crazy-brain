@@ -21,9 +21,16 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
             print(f"[worker] {step}", file=sys.stderr, flush=True)
 
         started_at = time.monotonic()
+        GOTO_MS = 30000
         args = [
             "--disable-dev-shm-usage",
             "--no-sandbox",
+            "--disable-gpu",
+            "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-sync",
+            "--disable-translate",
+            "--disable-features=site-per-process",
             f"--window-position={window_pos[0]},{window_pos[1]}",
             f"--window-size={window_size[0]},{window_size[1]}",
         ]
@@ -38,12 +45,22 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
             viewport={"width": window_size[0], "height": window_size[1]},
         )
         page = ctx.new_page()
+
+        def _route_reduce_ram(route) -> None:
+            # Non bloccare "image": la Cronologia usa icone <img> per Top Slot / Esito.
+            if route.request.resource_type in ("font", "media"):
+                route.abort()
+            else:
+                route.continue_()
+
+        page.route("**/*", _route_reduce_ram)
+
         _log("page goto started")
         # networkidle spesso non termina mai su siti con analytics/websocket → timeout subprocess.
-        page.goto(CRAZY_TIME_URL, wait_until="domcontentloaded", timeout=60000)
+        page.goto(CRAZY_TIME_URL, wait_until="domcontentloaded", timeout=GOTO_MS)
         _log("page goto finished")
         try:
-            page.wait_for_selector("table", timeout=20000)
+            page.wait_for_selector("table", timeout=12000)
             _log("selector table found")
         except Exception:
             # Keep going: table might still appear after cookie/scroll interactions.
@@ -64,7 +81,7 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         except Exception:
             pass
 
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(2000)
         _log("cookie/banner handling completed")
 
         def _ensure_cronologia_in_view() -> None:
@@ -99,9 +116,9 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         def _warm_load_more_rows() -> None:
             # Brute-force scroll the page to trigger lazy loading of older rows (6h history).
             try:
-                for _ in range(18):
+                for _ in range(10):
                     page.evaluate("() => window.scrollBy(0, 1400)")
-                    page.wait_for_timeout(180)
+                    page.wait_for_timeout(120)
             except Exception:
                 pass
             _ensure_cronologia_in_view()
@@ -135,7 +152,7 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         page.wait_for_timeout(500)
         _ensure_cronologia_in_view()
         try:
-            page.wait_for_selector("table:has-text('Risultato Slot')", timeout=8000)
+            page.wait_for_selector("table:has-text('Risultato Slot')", timeout=6000)
             _log("cronologia table selector found")
         except Exception:
             _log("cronologia table selector not found before extraction")
@@ -370,8 +387,8 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         stable_rounds = 0
         table_locator = page.locator("table").filter(has=page.get_by_text(re.compile(r"Risultato\\s+Slot", re.IGNORECASE)))
         # Keep scraping bounded for server runtimes (Render).
-        for _ in range(40):
-            if (time.monotonic() - started_at) > 50:
+        for _ in range(28):
+            if (time.monotonic() - started_at) > 30:
                 _log("time budget exceeded during extraction loop")
                 break
             batch: List[Dict[str, Any]] = extract_rows()
@@ -452,7 +469,7 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
                     now_min = now.hour * 60 + now.minute
                     # If lag > 1 minute, reload once (keep source close to live).
                     if now_min - latest_min > 1:
-                        page.goto(CRAZY_TIME_URL, wait_until="domcontentloaded", timeout=60000)
+                        page.goto(CRAZY_TIME_URL, wait_until="domcontentloaded", timeout=GOTO_MS)
                         page.wait_for_timeout(800)
                         extracted = extract_rows()
         except Exception:
@@ -473,18 +490,18 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         if extracted:
             print(f"PRIMA RIGA: {extracted[0]}", file=sys.stderr, flush=True)
             try:
-                page.screenshot(path="/tmp/debug_success.png", full_page=True)
+                page.screenshot(path="/tmp/debug_success.png", full_page=False)
             except Exception:
                 pass
         else:
             try:
-                page.screenshot(path="/tmp/debug_failure.png", full_page=True)
+                page.screenshot(path="/tmp/debug_failure.png", full_page=False)
             except Exception:
                 pass
 
         # Always keep a Render debug screenshot.
         try:
-            page.screenshot(path="/tmp/debug.png", full_page=True)
+            page.screenshot(path="/tmp/debug.png", full_page=False)
         except Exception:
             pass
 
@@ -498,10 +515,10 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
                 if locator.count() > 0:
                     locator.first.screenshot(path=shot)
                 else:
-                    page.screenshot(path=shot, full_page=True)
+                    page.screenshot(path=shot, full_page=False)
             except Exception:
                 try:
-                    page.screenshot(path=shot, full_page=True)
+                    page.screenshot(path=shot, full_page=False)
                 except Exception:
                     shot = None
 
