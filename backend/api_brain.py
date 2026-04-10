@@ -44,7 +44,8 @@ def _run_scrape_worker(limit: int = 60) -> Dict[str, Any]:
         "--screenshot-prefix",
         "cronologia",
     ]
-    timeout_sec = 30 if limit <= 120 else 50
+    # Render can be slower with Playwright startup/network; avoid killing the worker too early.
+    timeout_sec = 90 if limit <= 120 else 120
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"worker rc={proc.returncode}")

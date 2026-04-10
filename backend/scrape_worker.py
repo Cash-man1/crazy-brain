@@ -346,7 +346,8 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         seen_keys: set[str] = set()
         stable_rounds = 0
         table_locator = page.locator("table").filter(has=page.get_by_text(re.compile(r"Risultato\\s+Slot", re.IGNORECASE)))
-        for _ in range(80):
+        # Keep scraping bounded for server runtimes (Render).
+        for _ in range(40):
             batch: List[Dict[str, Any]] = extract_rows()
             grew = False
             for r in batch:
@@ -362,7 +363,7 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
                 stable_rounds += 1
             else:
                 stable_rounds = 0
-            if stable_rounds >= 10:
+            if stable_rounds >= 6:
                 break
             try:
                 page.evaluate(
