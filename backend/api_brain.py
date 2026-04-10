@@ -74,13 +74,28 @@ def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
     """
     Esegue lo scrape e, se la sorgente e' in ritardo oltre soglia, riprova subito
     scegliendo il payload con lag migliore.
+
+    Ordine: 1) API JSON pubblica Evolution (httpx, bassa RAM); 2) worker Playwright (fallback).
     """
-    # 1) Prima prova con worker Playwright (tabella reale => mapping esito piu accurato).
+    last_worker_error: Optional[str] = None
+    if os.getenv("SCRAPER_USE_EVOLUTION_API", "1").strip().lower() not in ("0", "false", "no"):
+        try:
+            from crazytime_api import fetch_evolution_crazytime_rows
+
+            api_rows = fetch_evolution_crazytime_rows(limit=limit)
+            if api_rows:
+                return {
+                    "rows": api_rows,
+                    "screenshot": None,
+                    "_worker_debug": "source=evolution-api (api-cs.casino.org)",
+                }
+        except Exception as exc:
+            last_worker_error = f"evolution-api: {type(exc).__name__}: {exc}"
+
     best_payload: Optional[Dict[str, Any]] = None
     best_rows: List[Dict[str, Any]] = []
     best_lag: Optional[int] = None
 
-    last_worker_error: Optional[str] = None
     for _ in range(max(1, SCRAPE_RETRY_ATTEMPTS)):
         try:
             payload = _run_scrape_worker(limit=limit)
