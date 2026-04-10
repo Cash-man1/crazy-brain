@@ -18,6 +18,7 @@ from pathlib import Path
 from live_scraper import scraper, DEFAULT_WINDOW_SIZE
 import threading
 import os
+import logging
 
 from database import get_db, User, get_user_by_id
 from security import get_current_user_id, get_client_ip, limiter
@@ -26,6 +27,7 @@ from live_window_stats import compute_live_window_stats
 from notifier import notify_hot_signals
 
 router = APIRouter(prefix="/brain", tags=["Crazy Time Tool"])
+logger = logging.getLogger(__name__)
 CRAZY_TIME_SOURCE_URL = "https://www.casino.org/casinoscores/it/crazy-time/"
 SCRAPER_VERSION = "2026-04-01-v4"
 SCRAPE_WORKER = Path(__file__).resolve().parent / "scrape_worker.py"
@@ -378,6 +380,23 @@ def start_public_ingestion_loop(initial_delay_seconds: float = 0.0) -> None:
     if _public_ingestion_task and not _public_ingestion_task.done():
         return
     _public_ingestion_task = asyncio.create_task(_public_ingestion_loop(initial_delay_seconds))
+    try:
+        def _on_done(t: asyncio.Task) -> None:
+            try:
+                exc = t.exception()
+            except asyncio.CancelledError:
+                logger.info("public ingestion loop cancelled")
+                return
+            except BaseException:
+                logger.exception("public ingestion loop done callback failed")
+                return
+            if exc is not None:
+                logger.exception("public ingestion loop crashed", exc_info=exc)
+            else:
+                logger.info("public ingestion loop finished")
+        _public_ingestion_task.add_done_callback(_on_done)
+    except Exception:
+        logger.exception("failed attaching ingestion loop callback")
 
 
 async def stop_public_ingestion_loop() -> None:

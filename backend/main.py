@@ -12,6 +12,7 @@ import logging
 import sys
 import asyncio
 import os
+from typing import Coroutine, Any
 
 from config import get_settings
 from database import init_db, AsyncSessionLocal, ensure_default_accounts
@@ -38,6 +39,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _spawn_bg_task(coro: Coroutine[Any, Any, Any], name: str) -> asyncio.Task:
+    logger.info("Starting background task: %s", name)
+    task = asyncio.create_task(coro, name=name)
+
+    def _on_done(t: asyncio.Task) -> None:
+        try:
+            exc = t.exception()
+        except asyncio.CancelledError:
+            logger.info("Background task cancelled: %s", name)
+            return
+        except BaseException:
+            logger.exception("Background task retrieval failed: %s", name)
+            return
+
+        if exc is not None:
+            logger.exception("Background task crashed: %s", name, exc_info=exc)
+        else:
+            logger.info("Background task finished: %s", name)
+
+    task.add_done_callback(_on_done)
+    return task
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Crazy Brain SaaS...")
@@ -59,7 +83,7 @@ async def lifespan(app: FastAPI):
             logger.exception("Failed ensuring default accounts")
 
     # Do not block startup on default-account bootstrap; keeps Render port detection stable.
-    asyncio.create_task(_ensure_defaults_background())
+    _spawn_bg_task(_ensure_defaults_background(), "ensure-default-accounts")
 
     logger.info("Application started successfully!")
 
