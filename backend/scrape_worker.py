@@ -23,10 +23,8 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
             f"--window-size={window_size[0]},{window_size[1]}",
         ]
 
-        try:
-            browser = pw.chromium.launch(channel="msedge", headless=headless, args=args)
-        except Exception:
-            browser = pw.chromium.launch(headless=headless, args=args)
+        # Render does not provide Edge channel: use bundled Chromium only.
+        browser = pw.chromium.launch(headless=True, args=args)
 
         ctx = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
@@ -49,7 +47,7 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         except Exception:
             pass
 
-        page.wait_for_timeout(1800)
+        page.wait_for_timeout(4000)
 
         def _ensure_cronologia_in_view() -> None:
             try:
@@ -443,6 +441,17 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
 
         extracted = sorted(extracted, key=row_sort_key, reverse=True)
 
+        # Debug signals for Render logs (stderr so JSON stdout remains valid).
+        print(f"ROWS TROVATE: {len(extracted)}", file=sys.stderr, flush=True)
+        if extracted:
+            print(f"PRIMA RIGA: {extracted[0]}", file=sys.stderr, flush=True)
+
+        # Always keep a Render debug screenshot.
+        try:
+            page.screenshot(path="/tmp/debug.png", full_page=True)
+        except Exception:
+            pass
+
         shot: Optional[str] = None
         if screenshot_prefix:
             DEFAULT_SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -486,7 +495,7 @@ def main() -> int:
     extracted, shot = _scrape(
         args.limit,
         args.screenshot_prefix if args.screenshot_prefix else None,
-        headless=(not args.headed),
+        headless=True,
         window_pos=(args.x, args.y),
         window_size=(args.w, args.h),
     )
