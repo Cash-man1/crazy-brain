@@ -371,7 +371,12 @@ async def refresh_public_cache_once() -> None:
             pass
 
 
-async def _public_ingestion_loop() -> None:
+async def _public_ingestion_loop(initial_delay_seconds: float = 0.0) -> None:
+    if initial_delay_seconds > 0:
+        try:
+            await asyncio.sleep(initial_delay_seconds)
+        except asyncio.CancelledError:
+            return
     while True:
         try:
             await refresh_public_cache_once()
@@ -382,11 +387,11 @@ async def _public_ingestion_loop() -> None:
         await asyncio.sleep(1.0)
 
 
-def start_public_ingestion_loop() -> None:
+def start_public_ingestion_loop(initial_delay_seconds: float = 0.0) -> None:
     global _public_ingestion_task
     if _public_ingestion_task and not _public_ingestion_task.done():
         return
-    _public_ingestion_task = asyncio.create_task(_public_ingestion_loop())
+    _public_ingestion_task = asyncio.create_task(_public_ingestion_loop(initial_delay_seconds))
 
 
 async def stop_public_ingestion_loop() -> None:

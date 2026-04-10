@@ -64,7 +64,8 @@ async def lifespan(app: FastAPI):
 
     # Start live ingestion in background (Render/prod).
     try:
-        start_public_ingestion_loop()
+        # Delay heavy scraping shortly so /health can become ready first on Render.
+        start_public_ingestion_loop(initial_delay_seconds=15.0)
         logger.info("Public ingestion loop started")
     except Exception:
         logger.exception("Failed starting ingestion loop")
