@@ -32,6 +32,11 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         )
         page = ctx.new_page()
         page.goto(CRAZY_TIME_URL, wait_until="networkidle", timeout=60000)
+        try:
+            page.wait_for_selector("table", timeout=20000)
+        except Exception:
+            # Keep going: table might still appear after cookie/scroll interactions.
+            pass
 
         # Cookie banner
         try:

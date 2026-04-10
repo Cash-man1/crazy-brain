@@ -84,22 +84,10 @@ def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
         if lag is not None and lag <= MAX_ALLOWED_SOURCE_LAG_SECONDS:
             return payload
 
-    # 2) Solo se worker non produce righe utili, fallback HTML diretto.
-    last_html_error: Optional[str] = None
-    if best_payload is None or not (best_payload.get("rows") or []):
-        try:
-            rows_html = _fetch_live_rows_sync()[:limit]
-            if rows_html:
-                return {"rows": rows_html, "screenshot": None}
-        except Exception as exc:
-            last_html_error = f"{type(exc).__name__}: {str(exc)}"
-
     if best_payload is None:
-        diag = "No rows from worker or HTML fallback"
+        diag = "No rows from Playwright worker"
         if last_worker_error:
             diag += f" | worker={last_worker_error}"
-        if last_html_error:
-            diag += f" | html={last_html_error}"
         return {"rows": [], "_worker_debug": diag}
 
     # Keep diagnostics even when payload is empty so API can expose root cause.
@@ -109,8 +97,6 @@ def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
             parts: List[str] = []
             if last_worker_error:
                 parts.append(f"worker={last_worker_error}")
-            if last_html_error:
-                parts.append(f"html={last_html_error}")
             diag = " | ".join(parts)
         if diag:
             best_payload["_worker_debug"] = diag
