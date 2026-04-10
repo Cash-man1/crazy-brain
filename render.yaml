@@ -26,6 +26,11 @@ services:
         sync: false
       - key: SECRET_KEY
         generateValue: true
+      # Login admin via telefono (POST /api/auth/phone/login): imposta nel pannello Render.
+      - key: ADMIN_PHONE_NUMBER
+        sync: false
+      - key: ADMIN_PHONE_PASSWORD
+        sync: false
 
   - type: web
     name: crazy-brain-web

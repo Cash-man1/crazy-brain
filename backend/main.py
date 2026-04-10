@@ -15,7 +15,7 @@ import os
 from typing import Coroutine, Any
 
 from config import get_settings
-from database import init_db, AsyncSessionLocal, ensure_default_accounts
+from database import init_db, AsyncSessionLocal, ensure_default_accounts, ensure_phone_admin_account
 from security import limiter
 from api_auth import router as auth_router
 from api_stripe import router as stripe_router
@@ -77,6 +77,11 @@ async def lifespan(app: FastAPI):
                     admin_email=settings.ADMIN_EMAIL,
                     admin_password=settings.ADMIN_PASSWORD,
                     vip_users=VIP_USERS,
+                )
+                await ensure_phone_admin_account(
+                    db,
+                    phone_number=settings.ADMIN_PHONE_NUMBER,
+                    password=settings.ADMIN_PHONE_PASSWORD,
                 )
             logger.info("Default accounts ensured")
         except Exception:

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-it.onrender.com'
+const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-api.onrender.com'
 
 interface User {
   id: number

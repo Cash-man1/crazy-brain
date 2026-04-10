@@ -4,6 +4,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Boolean, Float, Text, 
 from datetime import datetime, timedelta
 from typing import Optional
 import uuid
+import re
 
 from config import get_settings
 from security import get_password_hash
@@ -273,4 +274,45 @@ async def ensure_default_accounts(
             )
         )
 
+    await db.commit()
+
+
+async def ensure_phone_admin_account(
+    db: AsyncSession,
+    phone_number: str,
+    password: str,
+) -> None:
+    """
+    Crea o aggiorna un utente admin con numero di telefono (login /api/auth/phone/login).
+    Richiede ADMIN_PHONE_NUMBER e ADMIN_PHONE_PASSWORD non vuoti in config/env.
+    """
+    p = (phone_number or "").strip().replace(" ", "")
+    if not p or not password:
+        return
+    existing = await get_user_by_phone(db, p)
+    if existing:
+        existing.role = "admin"
+        existing.hashed_password = get_password_hash(password)
+        existing.is_active = True
+        existing.is_verified = True
+        existing.subscription_status = "active"
+        await db.commit()
+        return
+    digits = re.sub(r"\D", "", p) or "0"
+    base_email = f"admin-phone-{digits}@internal.crazy-brain.local"
+    email_local = base_email.lower()
+    if await get_user_by_email(db, email_local):
+        email_local = f"admin-phone-{digits}-{uuid.uuid4().hex[:8]}@internal.crazy-brain.local".lower()
+    db.add(
+        User(
+            email=email_local,
+            phone_number=p,
+            hashed_password=get_password_hash(password),
+            role="admin",
+            is_active=True,
+            is_verified=True,
+            subscription_status="active",
+            is_trial_used=False,
+        )
+    )
     await db.commit()

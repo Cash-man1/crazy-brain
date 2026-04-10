@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Brain } from 'lucide-react'
 import LegalFooter from '../components/LegalFooter'
+import { useAuth } from '../context/AuthContext'
 import { INSTAGRAM_URL } from '../config/social'
 
 const API_CANDIDATES = [
@@ -33,6 +35,7 @@ const SEGMENT_LABEL: Record<string, string> = {
 const instagramHref = INSTAGRAM_URL || 'https://www.instagram.com/'
 
 export default function LiveDashboardNoAuth() {
+  const { user, logout } = useAuth()
   const [data, setData] = useState<any>(null)
   const [error, setError] = useState('')
   const [apiBase, setApiBase] = useState('')
@@ -129,11 +132,10 @@ export default function LiveDashboardNoAuth() {
       <main className="dashboard-content dashboard-content--live">
         <div className="container container--live-full">
           <div className="welcome-section live-welcome-tight">
-            <h1>CRAZY BRAIN.999</h1>
-            <p>
-              Auto mode attivo — {pollSec === 1 ? 'aggiornamento ogni secondo' : `aggiornamento ogni ${pollSec} secondi`}. Storico salvato (ultime 300 giocate):{' '}
-              <strong>{data?.history_saved_rows ?? data?.history_saved_6h_rows ?? '—'}</strong> righe (persistenza locale; al riavvio si ricaricano le ultime 300).
-            </p>
+            <h1 className="live-brand-title">
+              <Brain className="live-brand-icon" aria-hidden strokeWidth={1.75} />
+              <span>CRAZY-BRAIN</span>
+            </h1>
           </div>
 
           {error && <div className="error-message">{error}</div>}
@@ -141,21 +143,23 @@ export default function LiveDashboardNoAuth() {
           {data && (
             <div className="status-grid" style={{ marginBottom: 18 }}>
               <div className="status-card">
-                <button
-                  type="button"
-                  onClick={() => setSourceOpen(true)}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid rgba(255,255,255,0.25)',
-                    color: 'inherit',
-                    padding: '6px 12px',
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    fontSize: '1rem',
-                  }}
-                >
-                  Fonte
-                </button>
+                {user?.role === 'admin' && (
+                  <button
+                    type="button"
+                    onClick={() => setSourceOpen(true)}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid rgba(255,255,255,0.25)',
+                      color: 'inherit',
+                      padding: '6px 12px',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      fontSize: '1rem',
+                    }}
+                  >
+                    Fonte
+                  </button>
+                )}
                 <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                   <Link className="btn btn-primary" to="/connect">
                     Collega Telegram / preferenze segnali
@@ -172,9 +176,20 @@ export default function LiveDashboardNoAuth() {
                   >
                     Instagram
                   </a>
-                  <Link className="btn btn-secondary" to="/login">
-                    Login / Registrati
-                  </Link>
+                  {!user && (
+                    <Link className="btn btn-secondary" to="/login">
+                      Login / Registrati
+                    </Link>
+                  )}
+                  {user && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => logout()}
+                    >
+                      Esci
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -356,6 +371,10 @@ export default function LiveDashboardNoAuth() {
 
               <div className="live-panel">
                 <h3 className="live-panel-title">Ultimi esiti</h3>
+                <p className="live-auto-mode-meta">
+                  Auto mode attivo — {pollSec === 1 ? 'aggiornamento ogni secondo' : `aggiornamento ogni ${pollSec} secondi`}. Storico salvato (ultime 300 giocate):{' '}
+                  <strong>{data?.history_saved_rows ?? data?.history_saved_6h_rows ?? '—'}</strong> righe (persistenza locale; al riavvio si ricaricano le ultime 300).
+                </p>
                 <p className="live-panel-hint">
                   {latestRowsAll.length === 0
                     ? 'Nessuna riga in buffer.'

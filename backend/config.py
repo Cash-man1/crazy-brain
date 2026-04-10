@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # Admin/VIP credentials (hashed in production)
     ADMIN_EMAIL: str = "admin@crazy-brain.local"
     ADMIN_PASSWORD: str = "ChangeMeNow1!"
+    # Opzionale: crea/aggiorna admin con login POST /api/auth/phone/login (numero + password).
+    # Imposta su Render (non committare la password nel repo).
+    ADMIN_PHONE_NUMBER: str = ""
+    ADMIN_PHONE_PASSWORD: str = ""
     
     class Config:
         env_file = ".env"
