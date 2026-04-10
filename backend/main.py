@@ -43,15 +43,23 @@ async def lifespan(app: FastAPI):
     
     await init_db()
     logger.info("Database initialized")
-    
-    async with AsyncSessionLocal() as db:
-        await ensure_default_accounts(
-            db,
-            admin_email=settings.ADMIN_EMAIL,
-            admin_password=settings.ADMIN_PASSWORD,
-            vip_users=VIP_USERS,
-        )
-    
+
+    async def _ensure_defaults_background() -> None:
+        try:
+            async with AsyncSessionLocal() as db:
+                await ensure_default_accounts(
+                    db,
+                    admin_email=settings.ADMIN_EMAIL,
+                    admin_password=settings.ADMIN_PASSWORD,
+                    vip_users=VIP_USERS,
+                )
+            logger.info("Default accounts ensured")
+        except Exception:
+            logger.exception("Failed ensuring default accounts")
+
+    # Do not block startup on default-account bootstrap; keeps Render port detection stable.
+    asyncio.create_task(_ensure_defaults_background())
+
     logger.info("Application started successfully!")
 
     # Start live ingestion in background (Render/prod).
