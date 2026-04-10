@@ -34,6 +34,7 @@ SCRAPE_WORKER = Path(__file__).resolve().parent / "scrape_worker.py"
 WORKER_PYTHON = Path(__file__).resolve().parent.parent / ".venv" / "Scripts" / "python.exe"
 MAX_ALLOWED_SOURCE_LAG_SECONDS = 20
 SCRAPE_RETRY_ATTEMPTS = 1
+SOURCE_FAILURE_THRESHOLD = 3
 
 
 def _run_scrape_worker(limit: int = 60) -> Dict[str, Any]:
@@ -47,7 +48,7 @@ def _run_scrape_worker(limit: int = 60) -> Dict[str, Any]:
         "cronologia",
     ]
     # Render can be slower with Playwright startup/network; avoid killing the worker too early.
-    timeout_sec = 90 if limit <= 120 else 120
+    timeout_sec = 70 if limit <= 120 else 90
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"worker rc={proc.returncode}")
@@ -166,7 +167,7 @@ async def refresh_public_cache_once() -> None:
 
     state = auto_state.setdefault(
         user_id,
-        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": []}
+        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": [], "consecutive_failures": 0}
     )
 
     # Evita refresh concorrenti
@@ -187,15 +188,23 @@ async def refresh_public_cache_once() -> None:
 
         with _public_state_lock:
             state["last_screenshot"] = payload.get("screenshot")
-            state["rows"] = parsed_rows
             state["last_poll"] = datetime.utcnow()
 
             if not parsed_rows:
-                source_ok_local = False
+                state["consecutive_failures"] = int(state.get("consecutive_failures") or 0) + 1
                 worker_dbg = str(payload.get("_worker_debug") or "").strip()
                 base_msg = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
-                source_error_local = f"{base_msg}. Worker: {worker_dbg}" if worker_dbg else base_msg
+                if state.get("rows") and state["consecutive_failures"] < SOURCE_FAILURE_THRESHOLD:
+                    source_ok_local = True
+                    source_error_local = (
+                        f"Fonte intermittente: fallimento {state['consecutive_failures']}/{SOURCE_FAILURE_THRESHOLD-1}, uso ultimo buffer valido."
+                    )
+                else:
+                    source_ok_local = False
+                    source_error_local = f"{base_msg}. Worker: {worker_dbg}" if worker_dbg else base_msg
             else:
+                state["rows"] = parsed_rows
+                state["consecutive_failures"] = 0
                 source_error_local = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
 
             for row in _rows_oldest_first(parsed_rows):
@@ -293,6 +302,7 @@ async def refresh_public_cache_once() -> None:
                 "tracked_rows": len(state["seen"]),
                 "latest_rows": rows_latest,
                 "source_latest_time": (rows_latest[0].get("time") if rows_latest else None),
+                "source_consecutive_failures": int(state.get("consecutive_failures") or 0),
                 "next_hot_signal": next_pick,
                 "hot_signals": hot_signals,
                 "mini_brains": mini_brains,
@@ -811,7 +821,7 @@ async def auto_brain_status(
 
     state = auto_state.setdefault(
         user_id,
-        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": []}
+        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": [], "consecutive_failures": 0}
     )
 
     now = datetime.utcnow()
@@ -829,14 +839,22 @@ async def auto_brain_status(
             lag_seconds = _time_lag_seconds(fetched_rows)
             parsed_rows = _clean_rows(fetched_rows)
             state["last_screenshot"] = payload.get("screenshot")
-            state["rows"] = parsed_rows
             state["last_poll"] = now
             if not parsed_rows:
-                source_ok = False
+                state["consecutive_failures"] = int(state.get("consecutive_failures") or 0) + 1
                 worker_dbg = str(payload.get("_worker_debug") or "").strip()
                 base_msg = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
-                source_error = f"{base_msg}. Worker: {worker_dbg}" if worker_dbg else base_msg
+                if state.get("rows") and state["consecutive_failures"] < SOURCE_FAILURE_THRESHOLD:
+                    source_ok = True
+                    source_error = (
+                        f"Fonte intermittente: fallimento {state['consecutive_failures']}/{SOURCE_FAILURE_THRESHOLD-1}, uso ultimo buffer valido."
+                    )
+                else:
+                    source_ok = False
+                    source_error = f"{base_msg}. Worker: {worker_dbg}" if worker_dbg else base_msg
             else:
+                state["rows"] = parsed_rows
+                state["consecutive_failures"] = 0
                 source_error = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
         except Exception as exc:
             source_ok = False
@@ -925,6 +943,7 @@ async def auto_brain_status(
         "tracked_rows": len(state["seen"]),
         "latest_rows": _rows_latest_first(state["rows"])[:24],
         "source_latest_time": (_rows_latest_first(state["rows"])[0].get("time") if state.get("rows") else None),
+        "source_consecutive_failures": int(state.get("consecutive_failures") or 0),
         "next_hot_signal": next_pick,
         "hot_signals": hot_signals,
         "session": brain.get_session_status(),
@@ -944,7 +963,7 @@ async def auto_brain_public():
 
     state = auto_state.setdefault(
         user_id,
-        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": []}
+        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": [], "consecutive_failures": 0}
     )
 
     # Bootstrap from persisted last-6h history (gives confidence immediately after restart).
@@ -1028,6 +1047,7 @@ async def auto_brain_public():
             "tracked_rows": len(state["seen"]),
             "latest_rows": rows_latest,
             "source_latest_time": (rows_latest[0].get("time") if rows_latest else None),
+            "source_consecutive_failures": int(state.get("consecutive_failures") or 0),
             "next_hot_signal": next_pick,
             "hot_signals": hot_signals,
             "mini_brains": mini_brains,
@@ -1060,15 +1080,23 @@ async def auto_brain_public():
 
                 with _public_state_lock:
                     state["last_screenshot"] = payload.get("screenshot")
-                    state["rows"] = parsed_rows
                     state["last_poll"] = datetime.utcnow()
 
                     if not parsed_rows:
-                        source_ok_local = False
+                        state["consecutive_failures"] = int(state.get("consecutive_failures") or 0) + 1
                         worker_dbg = str(payload.get("_worker_debug") or "").strip()
                         base_msg = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
-                        source_error_local = f"{base_msg}. Worker: {worker_dbg}" if worker_dbg else base_msg
+                        if state.get("rows") and state["consecutive_failures"] < SOURCE_FAILURE_THRESHOLD:
+                            source_ok_local = True
+                            source_error_local = (
+                                f"Fonte intermittente: fallimento {state['consecutive_failures']}/{SOURCE_FAILURE_THRESHOLD-1}, uso ultimo buffer valido."
+                            )
+                        else:
+                            source_ok_local = False
+                            source_error_local = f"{base_msg}. Worker: {worker_dbg}" if worker_dbg else base_msg
                     else:
+                        state["rows"] = parsed_rows
+                        state["consecutive_failures"] = 0
                         source_error_local = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
 
                     for row in _rows_oldest_first(parsed_rows):

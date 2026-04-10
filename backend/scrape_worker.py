@@ -4,6 +4,7 @@ import argparse
 import json
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,6 +17,10 @@ DEFAULT_SCREENSHOT_DIR = Path(__file__).resolve().parent / "screenshots"
 
 def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window_pos: Tuple[int, int], window_size: Tuple[int, int]):
     with sync_playwright() as pw:
+        def _log(step: str) -> None:
+            print(f"[worker] {step}", file=sys.stderr, flush=True)
+
+        started_at = time.monotonic()
         args = [
             "--disable-dev-shm-usage",
             "--no-sandbox",
@@ -24,18 +29,24 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         ]
 
         # Render does not provide Edge channel: use bundled Chromium only.
+        _log("browser launch started")
         browser = pw.chromium.launch(headless=True, args=args)
+        _log("browser launch finished")
 
         ctx = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
             viewport={"width": window_size[0], "height": window_size[1]},
         )
         page = ctx.new_page()
-        page.goto(CRAZY_TIME_URL, wait_until="networkidle", timeout=60000)
+        _log("page goto started")
+        page.goto(CRAZY_TIME_URL, wait_until="networkidle", timeout=45000)
+        _log("page goto finished")
         try:
             page.wait_for_selector("table", timeout=20000)
+            _log("selector table found")
         except Exception:
             # Keep going: table might still appear after cookie/scroll interactions.
+            _log("selector table not found in initial wait")
             pass
 
         # Cookie banner
@@ -53,6 +64,7 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
             pass
 
         page.wait_for_timeout(4000)
+        _log("cookie/banner handling completed")
 
         def _ensure_cronologia_in_view() -> None:
             try:
@@ -121,6 +133,11 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
             pass
         page.wait_for_timeout(500)
         _ensure_cronologia_in_view()
+        try:
+            page.wait_for_selector("table:has-text('Risultato Slot')", timeout=8000)
+            _log("cronologia table selector found")
+        except Exception:
+            _log("cronologia table selector not found before extraction")
         _warm_load_more_rows()
 
         def extract_rows() -> List[Dict[str, Any]]:
@@ -353,6 +370,9 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         table_locator = page.locator("table").filter(has=page.get_by_text(re.compile(r"Risultato\\s+Slot", re.IGNORECASE)))
         # Keep scraping bounded for server runtimes (Render).
         for _ in range(40):
+            if (time.monotonic() - started_at) > 50:
+                _log("time budget exceeded during extraction loop")
+                break
             batch: List[Dict[str, Any]] = extract_rows()
             grew = False
             for r in batch:
@@ -451,6 +471,15 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         print(f"ROWS TROVATE: {len(extracted)}", file=sys.stderr, flush=True)
         if extracted:
             print(f"PRIMA RIGA: {extracted[0]}", file=sys.stderr, flush=True)
+            try:
+                page.screenshot(path="/tmp/debug_success.png", full_page=True)
+            except Exception:
+                pass
+        else:
+            try:
+                page.screenshot(path="/tmp/debug_failure.png", full_page=True)
+            except Exception:
+                pass
 
         # Always keep a Render debug screenshot.
         try:
