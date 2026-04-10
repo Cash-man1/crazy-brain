@@ -11,6 +11,7 @@ import time
 import logging
 import sys
 import asyncio
+import os
 
 from config import get_settings
 from database import init_db, AsyncSessionLocal, ensure_default_accounts
@@ -62,11 +63,15 @@ async def lifespan(app: FastAPI):
 
     logger.info("Application started successfully!")
 
-    # Start live ingestion in background (Render/prod).
+    # Start live ingestion in background (Render/prod), unless explicitly disabled.
     try:
-        # Delay heavy scraping shortly so /health can become ready first on Render.
-        start_public_ingestion_loop(initial_delay_seconds=15.0)
-        logger.info("Public ingestion loop started")
+        enabled = os.getenv("PUBLIC_INGESTION_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+        if enabled:
+            # Delay heavy scraping shortly so /health can become ready first on Render.
+            start_public_ingestion_loop(initial_delay_seconds=15.0)
+            logger.info("Public ingestion loop started")
+        else:
+            logger.info("Public ingestion loop disabled by env PUBLIC_INGESTION_ENABLED")
     except Exception:
         logger.exception("Failed starting ingestion loop")
     
