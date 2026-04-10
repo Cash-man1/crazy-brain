@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Brain, AlertCircle, CheckCircle } from 'lucide-react'
+import { Brain, AlertCircle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import LegalFooter from '../components/LegalFooter'
 
 export default function Register() {
   const [email, setEmail] = useState('')
@@ -16,12 +17,12 @@ export default function Register() {
     setValidationError('')
 
     if (password !== confirmPassword) {
-      setValidationError('Passwords do not match')
+      setValidationError('Le password non coincidono')
       return
     }
 
     if (password.length < 6) {
-      setValidationError('Password must be at least 6 characters')
+      setValidationError('La password deve avere almeno 6 caratteri')
       return
     }
 
@@ -42,7 +43,7 @@ export default function Register() {
           <div className="logo-section">
             <Brain className="brain-icon" />
             <h1>Crazy Brain</h1>
-            <p>Create your premium account</p>
+            <p>Registrazione con email e password</p>
           </div>
 
           {(error || validationError) && (
@@ -54,11 +55,11 @@ export default function Register() {
 
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label className="form-label">Email Address</label>
+              <label className="form-label">Email</label>
               <input
                 type="email"
                 className="form-input"
-                placeholder="Enter your email"
+                placeholder="La tua email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -70,7 +71,7 @@ export default function Register() {
               <input
                 type="password"
                 className="form-input"
-                placeholder="Create a password"
+                placeholder="Scegli una password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -78,11 +79,11 @@ export default function Register() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Confirm Password</label>
+              <label className="form-label">Conferma password</label>
               <input
                 type="password"
                 className="form-input"
-                placeholder="Confirm your password"
+                placeholder="Ripeti la password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
@@ -94,24 +95,21 @@ export default function Register() {
               className="btn btn-primary"
               disabled={loading}
             >
-              {loading ? <span className="spinner" /> : 'Create Account'}
+              {loading ? <span className="spinner" /> : 'Crea account'}
             </button>
           </form>
 
           <div className="auth-links">
             <Link to="/login" className="auth-link gold">
-              Already have an account? Sign in
+              Hai già un account? Accedi
+            </Link>
+            <Link to="/login" className="auth-link">
+              Registrazione con telefono (OTP) → vai al login e scegli «Telefono»
             </Link>
           </div>
         </div>
 
-        <div className="auth-footer">
-          <span className="brand">by crazy-brain</span>
-          <div className="disclaimer">
-            ⚠️ By registering, you agree to our Terms of Service. 
-            This tool is for gambling analysis purposes. 18+ only.
-          </div>
-        </div>
+        <LegalFooter />
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Brain, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react'
+import LegalFooter from '../components/LegalFooter'
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-api.onrender.com'
 
@@ -45,7 +46,7 @@ export default function ForgotPassword() {
           <div className="logo-section">
             <Brain className="brain-icon" />
             <h1>Crazy Brain</h1>
-            <p>Reset your password</p>
+            <p>Recupero password (account email)</p>
           </div>
 
           {error && (
@@ -58,16 +59,16 @@ export default function ForgotPassword() {
           {success ? (
             <div className="success-message">
               <CheckCircle size={18} />
-              Check your email for reset instructions
+              Controlla la posta per le istruzioni di reset
             </div>
           ) : (
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label className="form-label">Email Address</label>
+                <label className="form-label">Email</label>
                 <input
                   type="email"
                   className="form-input"
-                  placeholder="Enter your email"
+                  placeholder="La tua email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -79,7 +80,7 @@ export default function ForgotPassword() {
                 className="btn btn-primary"
                 disabled={loading}
               >
-                {loading ? <span className="spinner" /> : 'Send Reset Link'}
+                {loading ? <span className="spinner" /> : 'Invia link di reset'}
               </button>
             </form>
           )}
@@ -87,14 +88,12 @@ export default function ForgotPassword() {
           <div className="auth-links">
             <Link to="/login" className="auth-link" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
               <ArrowLeft size={16} />
-              Back to login
+              Torna al login
             </Link>
           </div>
         </div>
 
-        <div className="auth-footer">
-          <span className="brand">by crazy-brain</span>
-        </div>
+        <LegalFooter />
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Brain, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react'
+import LegalFooter from '../components/LegalFooter'
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-api.onrender.com'
 
@@ -56,7 +57,7 @@ export default function ResetPassword() {
           <div className="logo-section">
             <Brain className="brain-icon" />
             <h1>Crazy Brain</h1>
-            <p>Choose a new password</p>
+            <p>Nuova password (link da email)</p>
           </div>
 
           {error && (
@@ -69,16 +70,16 @@ export default function ResetPassword() {
           {success ? (
             <div className="success-message">
               <CheckCircle size={18} />
-              Password updated. Redirecting to login...
+              Password aggiornata. Reindirizzamento al login…
             </div>
           ) : (
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label className="form-label">New Password</label>
+                <label className="form-label">Nuova password</label>
                 <input
                   type="password"
                   className="form-input"
-                  placeholder="Enter a strong password"
+                  placeholder="Scegli una password sicura"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   required
@@ -86,7 +87,7 @@ export default function ResetPassword() {
               </div>
 
               <button type="submit" className="btn btn-primary" disabled={loading || !token}>
-                {loading ? <span className="spinner" /> : 'Update Password'}
+                {loading ? <span className="spinner" /> : 'Aggiorna password'}
               </button>
               {!token && (
                 <div className="description" style={{ marginTop: 10, opacity: 0.85 }}>
@@ -103,14 +104,12 @@ export default function ResetPassword() {
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
             >
               <ArrowLeft size={16} />
-              Back to login
+              Torna al login
             </Link>
           </div>
         </div>
 
-        <div className="auth-footer">
-          <span className="brand">by crazy-brain</span>
-        </div>
+        <LegalFooter />
       </div>
     </div>
   )

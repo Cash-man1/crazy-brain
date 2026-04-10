@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Brain, AlertCircle, CheckCircle, ArrowLeft } from 'lucide-react'
+import LegalFooter from '../components/LegalFooter'
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-api.onrender.com'
 
@@ -81,7 +82,7 @@ export default function PhoneForgotPassword() {
           <div className="logo-section">
             <Brain className="brain-icon" />
             <h1>Crazy Brain</h1>
-            <p>Reset password (via Telegram OTP)</p>
+            <p>Recupero password con telefono (OTP su Telegram)</p>
           </div>
 
           {error && (
@@ -99,7 +100,7 @@ export default function PhoneForgotPassword() {
           ) : (
             <form onSubmit={confirm}>
               <div className="form-group">
-                <label className="form-label">Phone number</label>
+                <label className="form-label">Numero di telefono</label>
                 <input
                   type="tel"
                   className="form-input"
@@ -132,11 +133,11 @@ export default function PhoneForgotPassword() {
               </button>
 
               <div className="form-group">
-                <label className="form-label">OTP code</label>
+                <label className="form-label">Codice OTP</label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="6-digit code"
+                  placeholder="Codice a 6 cifre"
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value)}
                   required
@@ -144,11 +145,11 @@ export default function PhoneForgotPassword() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">New password</label>
+                <label className="form-label">Nuova password</label>
                 <input
                   type="password"
                   className="form-input"
-                  placeholder="New password"
+                  placeholder="Nuova password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   required
@@ -168,14 +169,12 @@ export default function PhoneForgotPassword() {
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
             >
               <ArrowLeft size={16} />
-              Back to login
+              Torna al login
             </Link>
           </div>
         </div>
 
-        <div className="auth-footer">
-          <span className="brand">by crazy-brain</span>
-        </div>
+        <LegalFooter />
       </div>
     </div>
   )

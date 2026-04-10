@@ -2,8 +2,11 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Brain, Crown, LogOut, Shield, Zap } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
+import LegalFooter from '../components/LegalFooter'
+import { INSTAGRAM_URL } from '../config/social'
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-it.onrender.com'
+const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-api.onrender.com'
+const instagramHref = INSTAGRAM_URL || 'https://www.instagram.com/'
 const SEGMENTS = ['1', '2', '5', '10', 'CF', 'CH', 'PA', 'CT']
 
 type AccessStatus = {
@@ -189,6 +192,17 @@ export default function Dashboard() {
                 Avvia crazy-brain.999 automatico
               </button>
             </p>
+            <p style={{ marginTop: 10 }}>
+              <a
+                className="btn btn-secondary"
+                href={instagramHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'inline-block', textDecoration: 'none', textAlign: 'center' }}
+              >
+                Instagram
+              </a>
+            </p>
           </div>
 
           <div className="status-grid">
@@ -260,6 +274,7 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+        <LegalFooter variant="dashboard" />
       </main>
     </div>
   )

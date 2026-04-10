@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import LegalFooter from '../components/LegalFooter'
+import { INSTAGRAM_URL } from '../config/social'
 
 const API_CANDIDATES = [
   import.meta.env.VITE_API_URL,
@@ -27,6 +29,8 @@ const SEGMENT_LABEL: Record<string, string> = {
   PA: 'Pachinko',
   CT: 'Crazy Time',
 }
+
+const instagramHref = INSTAGRAM_URL || 'https://www.instagram.com/'
 
 export default function LiveDashboardNoAuth() {
   const [data, setData] = useState<any>(null)
@@ -152,12 +156,24 @@ export default function LiveDashboardNoAuth() {
                 >
                   Fonte
                 </button>
-                <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                   <Link className="btn btn-primary" to="/connect">
                     Collega Telegram / preferenze segnali
                   </Link>
                   <Link className="btn" to="/chat">
                     Chat live
+                  </Link>
+                  <a
+                    className="btn btn-secondary"
+                    href={instagramHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={INSTAGRAM_URL ? 'Profilo Instagram' : 'Instagram — imposta VITE_INSTAGRAM_URL su Render per il tuo profilo'}
+                  >
+                    Instagram
+                  </a>
+                  <Link className="btn btn-secondary" to="/login">
+                    Login / Registrati
                   </Link>
                 </div>
               </div>
@@ -525,6 +541,7 @@ export default function LiveDashboardNoAuth() {
             </div>
           </div>
         </div>
+        <LegalFooter variant="dashboard" />
       </main>
     </div>
   )

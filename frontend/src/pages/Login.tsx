@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Brain, AlertCircle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import LegalFooter from '../components/LegalFooter'
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-api.onrender.com'
 
@@ -121,7 +122,7 @@ export default function Login() {
           <div className="logo-section">
             <Brain className="brain-icon" />
             <h1>Crazy Brain</h1>
-            <p>Access your premium analysis tools</p>
+            <p>Accedi al tool — email oppure telefono + Telegram (OTP)</p>
           </div>
 
           {(error || otpError) && (
@@ -148,18 +149,18 @@ export default function Login() {
               onClick={() => setMode('phone')}
               disabled={loading || otpLoading}
             >
-              Phone OTP
+              Telefono (OTP)
             </button>
           </div>
 
           {mode === 'email' ? (
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label className="form-label">Email Address</label>
+                <label className="form-label">Email</label>
                 <input
                   type="email"
                   className="form-input"
-                  placeholder="Enter your email"
+                  placeholder="La tua email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -171,7 +172,7 @@ export default function Login() {
                 <input
                   type="password"
                   className="form-input"
-                  placeholder="Enter your password"
+                  placeholder="Password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -179,7 +180,7 @@ export default function Login() {
               </div>
 
               <button type="submit" className="btn btn-primary" disabled={loading}>
-                {loading ? <span className="spinner" /> : 'Sign In'}
+                {loading ? <span className="spinner" /> : 'Accedi'}
               </button>
             </form>
           ) : (
@@ -211,7 +212,7 @@ export default function Login() {
 
               <form onSubmit={phoneMode === 'register' ? registerWithOtp : phoneLogin}>
               <div className="form-group">
-                <label className="form-label">Phone number</label>
+                <label className="form-label">Numero di telefono</label>
                 <input
                   type="tel"
                   className="form-input"
@@ -255,11 +256,11 @@ export default function Login() {
                   </button>
 
                   <div className="form-group">
-                    <label className="form-label">OTP code</label>
+                    <label className="form-label">Codice OTP</label>
                     <input
                       type="text"
                       className="form-input"
-                      placeholder="6-digit code"
+                      placeholder="Codice a 6 cifre"
                       value={otpCode}
                       onChange={(e) => setOtpCode(e.target.value)}
                       required
@@ -279,11 +280,11 @@ export default function Login() {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Confirm Password</label>
+                    <label className="form-label">Conferma password</label>
                     <input
                       type="password"
                       className="form-input"
-                      placeholder="Confirm password"
+                      placeholder="Ripeti la password"
                       value={phonePassword2}
                       onChange={(e) => setPhonePassword2(e.target.value)}
                       required
@@ -311,34 +312,34 @@ export default function Login() {
                   <button type="submit" className="btn btn-primary" disabled={otpLoading || !phoneNumber || !phonePassword}>
                     {otpLoading ? <span className="spinner" /> : 'Accedi'}
                   </button>
-                  <div className="auth-links" style={{ marginTop: 10 }}>
-                    <Link to="/phone-forgot-password" className="auth-link">
-                      Password dimenticata (telefono)
-                    </Link>
-                  </div>
                 </>
               )}
             </form>
             </div>
           )}
 
-          <div className="auth-links">
-            <Link to="/forgot-password" className="auth-link">
-              Forgot password?
-            </Link>
-            <Link to="/register" className="auth-link gold">
-              Don't have an account? Register now
-            </Link>
-          </div>
+          {mode === 'email' ? (
+            <div className="auth-links">
+              <Link to="/forgot-password" className="auth-link">
+                Password dimenticata (email)
+              </Link>
+              <Link to="/register" className="auth-link gold">
+                Non hai un account? Registrati con email
+              </Link>
+            </div>
+          ) : (
+            <div className="auth-links">
+              <Link to="/phone-forgot-password" className="auth-link">
+                Password dimenticata (telefono)
+              </Link>
+              <Link to="/register" className="auth-link gold">
+                Preferisci solo email? Registrati qui
+              </Link>
+            </div>
+          )}
         </div>
 
-        <div className="auth-footer">
-          <span className="brand">by crazy-brain</span>
-          <div className="disclaimer">
-            ⚠️ This tool is intended for gambling analysis and entertainment purposes only. 
-            Please gamble responsibly. 18+ only.
-          </div>
-        </div>
+        <LegalFooter />
       </div>
     </div>
   )

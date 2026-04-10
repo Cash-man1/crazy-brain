@@ -363,6 +363,39 @@ h1, h2, h3 {
   line-height: 1.4;
 }
 
+.legal-disclaimer p {
+  margin: 0 0 10px;
+}
+
+.legal-disclaimer p:last-child {
+  margin-bottom: 0;
+}
+
+.legal-disclaimer a {
+  color: var(--gold);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.legal-disclaimer a:hover {
+  color: var(--gold-light);
+}
+
+.legal-disclaimer--compact {
+  font-size: 0.72rem;
+  text-align: left;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.legal-footer--dashboard {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(212, 175, 55, 0.15);
+  text-align: center;
+}
+
 /* Dashboard Styles */
 .dashboard {
   min-height: 100vh;
