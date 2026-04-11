@@ -4,7 +4,22 @@ Questa guida descrive un rilascio **ripetibile** con frontend statico, API Docke
 
 ---
 
-## A. Architettura consigliata
+## Ruoli dei servizi Render (nomi nel `render.yaml` — non confonderli)
+
+Questi sono i **quattro pilastri** del deploy consigliato. I nomi corrispondono al Blueprint in repo; puoi rinominarli nel pannello Render, ma è utile tenerli allineati per log, metriche e variabili incrociate.
+
+| Nome servizio Render | Tipo | Ruolo |
+|----------------------|------|--------|
+| **`crazy-brain-web`** | **Static Site** | Frontend Vite/React: solo asset statici e chiamate al backend via `VITE_API_URL`. Nessuna logica server. |
+| **`crazy-brain-api`** | **Web Service** (Docker) | API FastAPI leggera: auth, Stripe, Telegram, brain, JSON dashboard. Preferire **`Dockerfile.api`** + `SCRAPER_PLAYWRIGHT_FALLBACK=0` per RAM bassa (vedi sotto). |
+| **`crazy-brain-live-worker`** | **Background Worker** (Docker) | Processo separato: solo polling Evolution (`httpx`) e scrittura su **Redis** (`run_live_worker.py`). Nessun browser, bassa RAM. |
+| **`REDIS_URL`** | **Add-on Redis** (Render Redis o Upstash) | **Consigliato in produzione:** una sola URL usata da (1) **cache JSON** della dashboard pubblica (`external_public_cache`) e (2) **buffer righe live** (`live_rows_redis`). Sull’API imposta anche `LIVE_ROWS_FROM_REDIS=1` se vuoi che il web legga prima Redis popolato dal worker. |
+
+**In sintesi:** il browser parla solo con **`crazy-brain-web`** → API; i dati live pesanti non devono stare nel processo **`crazy-brain-api`** se usi worker + Redis; senza Redis l’API può ancora usare Evolution in-process, con più RAM sullo stesso dyno.
+
+---
+
+## A. Architettura consigliata (dettaglio)
 
 | Componente | Render | Immagine / comando | Ruolo |
 |------------|--------|-------------------|--------|

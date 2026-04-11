@@ -54,9 +54,11 @@ git push origin main
 1) Vai su Render  
 2) **New → Blueprint**  
 3) Collega il repo GitHub  
-4) Render crea 2 servizi:
-   - **`crazy-brain-api`** (backend)
-   - **`crazy-brain-web`** (frontend)
+4) Il Blueprint crea i servizi con questi ruoli (vedi tabella estesa in **`docs/RENDER_DEPLOY.md`**):
+   - **`crazy-brain-web`** — frontend statico (sito)
+   - **`crazy-brain-api`** — API leggera (Docker backend)
+   - **`crazy-brain-live-worker`** — worker separato per dati live (httpx → Redis)
+   - Aggiungi un **Redis** (Render o Upstash) e imposta **`REDIS_URL`** su API + worker: cache pubblica dashboard + buffer righe live (consigliato)
 
 ### Variabili (ENV) da impostare su Render
 
