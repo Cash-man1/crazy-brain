@@ -31,6 +31,8 @@ def normalize_segment(text: str) -> Optional[str]:
         return "PA"
     if "crazy time" in t:
         return "CT"
+    if "crazy bonus" in t or "crazybonus" in t.replace(" ", ""):
+        return "CT"
     # support "2x" / "2 x" and plain numbers
     m = re.search(r"\b(10|5|2|1)\s*x?\b", t)
     return m.group(1) if m else None

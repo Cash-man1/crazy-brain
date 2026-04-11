@@ -25,11 +25,20 @@ from security import get_current_user_id, get_client_ip, limiter
 from brain_engine import BrainEngine, ALL_SEGMENTS, THEORETICAL_PROBS
 from live_window_stats import compute_live_window_stats
 from notifier import notify_hot_signals
+from external_public_cache import public_cache_load, public_cache_store
+from live_data_pipeline import (
+    apply_brain_spin,
+    row_dedupe_key,
+    row_valid_for_brain,
+    rows_newest_first,
+    rows_oldest_first,
+    time_lag_seconds as pipeline_time_lag_seconds,
+)
 
 router = APIRouter(prefix="/brain", tags=["Crazy Time Tool"])
 logger = logging.getLogger(__name__)
 CRAZY_TIME_SOURCE_URL = "https://www.casino.org/casinoscores/it/crazy-time/"
-SCRAPER_VERSION = "2026-04-01-v4"
+SCRAPER_VERSION = "2026-04-11-v5-pipeline-utc"
 
 
 def _iso_utc_z(dt: Optional[datetime] = None) -> str:
@@ -75,9 +84,24 @@ def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
     Esegue lo scrape e, se la sorgente e' in ritardo oltre soglia, riprova subito
     scegliendo il payload con lag migliore.
 
-    Ordine: 1) API JSON pubblica Evolution (httpx, bassa RAM); 2) worker Playwright (fallback).
+    Ordine: 1) Redis buffer (worker separato, opzionale); 2) API JSON Evolution;
+    3) worker Playwright (se abilitato).
     """
     last_worker_error: Optional[str] = None
+    if os.getenv("LIVE_ROWS_FROM_REDIS", "0").strip().lower() in ("1", "true", "yes"):
+        try:
+            from live_rows_redis import try_load_live_rows
+
+            rrows = try_load_live_rows()
+            if rrows:
+                return {
+                    "rows": rrows[:limit],
+                    "screenshot": None,
+                    "_worker_debug": "source=redis-live-buffer",
+                }
+        except Exception as exc:
+            last_worker_error = f"redis-live: {type(exc).__name__}: {exc}"
+
     if os.getenv("SCRAPER_USE_EVOLUTION_API", "1").strip().lower() not in ("0", "false", "no"):
         try:
             from crazytime_api import fetch_evolution_crazytime_rows
@@ -91,6 +115,13 @@ def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
                 }
         except Exception as exc:
             last_worker_error = f"evolution-api: {type(exc).__name__}: {exc}"
+
+    pw_ok = os.getenv("SCRAPER_PLAYWRIGHT_FALLBACK", "1").strip().lower() not in ("0", "false", "no")
+    if not pw_ok:
+        diag = "Playwright fallback disabilitato (usare Evolution API e/o Redis worker)"
+        if last_worker_error:
+            diag += f" | {last_worker_error}"
+        return {"rows": [], "screenshot": None, "_worker_debug": diag}
 
     best_payload: Optional[Dict[str, Any]] = None
     best_rows: List[Dict[str, Any]] = []
@@ -133,6 +164,10 @@ def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
 
 
 def _time_lag_seconds(rows: List[Dict[str, Any]]) -> Optional[int]:
+    lag = pipeline_time_lag_seconds(rows)
+    if lag is not None:
+        return lag
+    # Fallback deprecato: solo HH:MM locale (inaffidabile su server UTC vs orario Italia).
     if not rows:
         return None
     t = str(rows[0].get("time") or "")
@@ -140,7 +175,7 @@ def _time_lag_seconds(rows: List[Dict[str, Any]]) -> Optional[int]:
     if not m:
         return None
     row_min = int(m.group(1)) * 60 + int(m.group(2))
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     now_min = now.hour * 60 + now.minute
     lag_min = now_min - row_min
     if lag_min < 0:
@@ -149,6 +184,8 @@ def _time_lag_seconds(rows: List[Dict[str, Any]]) -> Optional[int]:
 
 
 def _rows_latest_first(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if any(r.get("settled_at_utc") for r in rows):
+        return rows_newest_first(rows)
     def key(r: Dict[str, Any]) -> int:
         t = str(r.get("time") or "")
         m = re.match(r"^(\d{1,2}):(\d{2})$", t)
@@ -159,6 +196,8 @@ def _rows_latest_first(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _rows_oldest_first(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if any(r.get("settled_at_utc") for r in rows):
+        return rows_oldest_first(rows)
     return list(reversed(_rows_latest_first(rows)))
 
 
@@ -172,8 +211,6 @@ auto_state: Dict[int, Dict[str, Any]] = {}
 PUBLIC_GUEST_ID = 0
 
 # Public autopoll cache: keep responses fast even at 1s refresh.
-_public_cache: Dict[str, Any] = {"ts": 0.0, "payload": None}
-_public_lock = threading.Lock()
 _public_inflight = False
 _public_state_lock = threading.Lock()
 _public_bootstrapped = False
@@ -234,39 +271,16 @@ async def refresh_public_cache_once() -> None:
                 source_error_local = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
 
             for row in _rows_oldest_first(parsed_rows):
-                dt = str(row.get("datetime_text") or row.get("time") or "").strip().lower()
-                slot = str(row.get("slot_result") or "").strip().lower()
-                wheel = str(row.get("wheel_result") or "").strip().lower()
-                mults = row.get("top_slot_multipliers") or []
-                mult_sig = ",".join(str(x) for x in mults)
-                key = f"{dt}|{slot}|{wheel}|{mult_sig}"
+                key = row_dedupe_key(row)
                 if key in state["seen"]:
                     continue
                 wheel_seg = row.get("wheel_segment") or row.get("segment")
                 slot_seg = row.get("slot_segment")
-
-                if wheel_seg in ALL_SEGMENTS:
-                    top = row.get("top_slot_multipliers") or []
-                    bonus_data: Dict[str, Any] = {
-                        "slot_result": row.get("slot_result"),
-                        "wheel_result": row.get("wheel_result"),
-                        "slot_segment": slot_seg,
-                        "wheel_segment": wheel_seg,
-                        "top_slot_multipliers": top,
-                    }
-                    multiplier_to_send: Optional[int] = None
-                    if str(wheel_seg).isdigit():
-                        base = int(wheel_seg)
-                        bonus_data["base_wheel"] = base
-                        multiplier_to_send = max(top) if top else base
-                    else:
-                        multiplier_to_send = max(top) if top else None
-
-                    if multiplier_to_send is not None:
-                        brain.add_spin(segment=wheel_seg, multiplier=multiplier_to_send, mult_segment=wheel_seg, bonus_data=bonus_data)
-                    else:
-                        brain.add_spin(segment=wheel_seg, bonus_data=bonus_data)
-
+                if not row_valid_for_brain(row, wheel_seg):
+                    logger.warning("public ingest: scarto riga non valida per brain wheel_seg=%s", wheel_seg)
+                    state["seen"].add(key)
+                    continue
+                apply_brain_spin(brain, str(wheel_seg), slot_seg, row)
                 state["seen"].add(key)
                 new_count_local += 1
 
@@ -276,12 +290,7 @@ async def refresh_public_cache_once() -> None:
             existing_keys = {str(x.get("key")) for x in existing if isinstance(x, dict)}
             now_ts = time.time()
             for row in parsed_rows:
-                dt = str(row.get("datetime_text") or row.get("time") or "").strip().lower()
-                slot = str(row.get("slot_result") or "").strip().lower()
-                wheel = str(row.get("wheel_result") or "").strip().lower()
-                mults = row.get("top_slot_multipliers") or []
-                mult_sig = ",".join(str(x) for x in mults)
-                k2 = f"{dt}|{slot}|{wheel}|{mult_sig}"
+                k2 = row_dedupe_key(row)
                 if k2 in existing_keys:
                     continue
                 existing.append({"key": k2, "observed_at": now_ts, "row": row})
@@ -328,6 +337,7 @@ async def refresh_public_cache_once() -> None:
                 "tracked_rows": len(state["seen"]),
                 "latest_rows": rows_latest,
                 "source_latest_time": (rows_latest[0].get("time") if rows_latest else None),
+                "source_latest_settled_utc": (rows_latest[0].get("settled_at_utc") if rows_latest else None),
                 "source_consecutive_failures": int(state.get("consecutive_failures") or 0),
                 "next_hot_signal": next_pick,
                 "hot_signals": hot_signals,
@@ -343,9 +353,7 @@ async def refresh_public_cache_once() -> None:
                 await notify_hot_signals(payload_out_local.get("hot_signals") or [], source="public")
             except Exception:
                 pass
-        with _public_lock:
-            _public_cache["payload"] = payload_out_local
-            _public_cache["ts"] = time.time()
+        public_cache_store(payload_out_local)
     except Exception as e:
         # Non far crashare il loop, ma esponi l'errore nel payload
         try:
@@ -383,9 +391,7 @@ async def refresh_public_cache_once() -> None:
                 "session": brain.get_session_status() if brain else {},
                 "live_statistics": {},
             }
-            with _public_lock:
-                _public_cache["payload"] = err_payload
-                _public_cache["ts"] = time.time()
+            public_cache_store(err_payload)
         except Exception:
             pass
     finally:
@@ -537,6 +543,9 @@ def _normalize_segment(raw_text: str) -> Optional[str]:
         return "PA"
     if "crazy time" in t or "crazytime" in t_norm:
         return "CT"
+    # Crazy Bonus (Top Slot) non è il numero in "x5"
+    if "crazy bonus" in t or "crazybonus" in t_norm:
+        return "CT"
     for n in ("10", "5", "2", "1"):
         if re.search(rf"(^|\D){n}x?($|\D)", t):
             return n
@@ -559,13 +568,23 @@ def _clean_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         slot_seg = _normalize_segment(slot_icon) or _normalize_segment(slot) or _normalize_segment(str(row.get("slot_segment") or ""))
         seg = wheel_seg or slot_seg
         top = row.get("top_slot_multipliers") or []
+        max_m = row.get("max_multiplier")
+        top_only = row.get("top_slot_multiplier")
+        # Moltiplicatore finale mostrato in UI: preferisci payout max da Evolution, altrimenti euristica legacy.
         final_mult: Optional[int] = None
-        if top:
-            final_mult = max(top)
-        elif wheel_seg and str(wheel_seg).isdigit():
+        if max_m is not None:
+            try:
+                final_mult = int(max_m)
+            except (TypeError, ValueError):
+                final_mult = None
+        if final_mult is None and top:
+            final_mult = max(int(x) for x in top if x is not None)
+        elif final_mult is None and wheel_seg and str(wheel_seg).isdigit():
             final_mult = int(wheel_seg)
         cleaned.append(
             {
+                "event_id": row.get("event_id") or "",
+                "settled_at_utc": row.get("settled_at_utc") or "",
                 "time": row.get("time"),
                 "datetime_text": row.get("datetime_text") or row.get("time"),
                 "segment": seg,  # per compat UI (prefer wheel)
@@ -576,7 +595,10 @@ def _clean_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "wheel_result": wheel,
                 "wheel_icon": wheel_icon or None,
                 "top_slot_multipliers": top,
+                "top_slot_multiplier": top_only if top_only is not None else None,
+                "max_multiplier": int(max_m) if max_m is not None else None,
                 "final_multiplier": final_mult,
+                "data_source": row.get("data_source") or "legacy",
             }
         )
     return cleaned
@@ -887,65 +909,17 @@ async def auto_brain_status(
             source_ok = False
             source_error = str(exc)
 
-        for row in parsed_rows:
-            # Dedup robusto: la stessa "ora" può ripetersi (es. 14:48) -> includiamo contenuto della riga.
-            dt = str(row.get("datetime_text") or row.get("time") or "").strip().lower()
-            slot = str(row.get("slot_result") or "").strip().lower()
-            wheel = str(row.get("wheel_result") or "").strip().lower()
-            mults = row.get("top_slot_multipliers") or []
-            mult_sig = ",".join(str(x) for x in mults)
-            key = f"{dt}|{slot}|{wheel}|{mult_sig}"
+        for row in _rows_oldest_first(parsed_rows):
+            key = row_dedupe_key(row)
             if key in state["seen"]:
                 continue
             wheel_seg = row.get("wheel_segment") or row.get("segment")
             slot_seg = row.get("slot_segment")
-            slot_raw = str(row.get("slot_result") or "").strip().lower()
-
-            # Regole (come richiesto):
-            # - Esito ruota arriva sempre (wheel_seg).
-            # - Per NUMERI (1/2/5/10): il valore finale lo prendiamo DIRETTAMENTE dalla colonna "Moltip." della pagina.
-            #   Il sito fa già il calcolo (es. ruota=10 -> Moltip.=10X; se top slot coincide -> Moltip.=20X ecc.).
-            # - Per BONUS: i moltiplicatori li prendiamo dalla pagina (range/lista); usiamo max(top) come valore da inviare,
-            #   e salviamo min/max/lista in bonus_data.
-            if wheel_seg in ALL_SEGMENTS:
-                top = row.get("top_slot_multipliers") or []
-                bonus_data: Dict[str, Any] = {
-                    "slot_result": row.get("slot_result"),
-                    "wheel_result": row.get("wheel_result"),
-                    "slot_segment": slot_seg,
-                    "wheel_segment": wheel_seg,
-                    "top_slot_multipliers": top,
-                }
-
-                multiplier_to_send: Optional[int] = None
-
-                if str(wheel_seg).isdigit():
-                    base = int(wheel_seg)
-                    bonus_data["base_wheel"] = base
-                    if top:
-                        bonus_data["min_multiplier"] = min(top)
-                        bonus_data["max_multiplier"] = max(top)
-                        bonus_data["final_multiplier"] = max(top)
-                        multiplier_to_send = max(top)
-                    else:
-                        # fallback se la pagina non mostra Moltip. per qualche motivo
-                        bonus_data["final_multiplier"] = base
-                        multiplier_to_send = base
-                else:
-                    # bonus
-                    if top:
-                        bonus_data["min_multiplier"] = min(top)
-                        bonus_data["max_multiplier"] = max(top)
-                        bonus_data["final_multiplier"] = max(top)
-                        multiplier_to_send = max(top)
-                    else:
-                        bonus_data["final_multiplier"] = None
-                        multiplier_to_send = None
-
-                if multiplier_to_send is not None:
-                    brain.add_spin(segment=wheel_seg, multiplier=multiplier_to_send, mult_segment=wheel_seg, bonus_data=bonus_data)
-                else:
-                    brain.add_spin(segment=wheel_seg, bonus_data=bonus_data)
+            if not row_valid_for_brain(row, wheel_seg):
+                logger.warning("auto_brain: scarto riga non valida wheel_seg=%s", wheel_seg)
+                state["seen"].add(key)
+                continue
+            apply_brain_spin(brain, str(wheel_seg), slot_seg, row)
             state["seen"].add(key)
             new_count += 1
 
@@ -1017,27 +991,10 @@ async def auto_brain_public():
                 if not isinstance(row, dict):
                     continue
                 wheel_seg = row.get("wheel_segment") or row.get("segment")
-                if wheel_seg not in ALL_SEGMENTS:
+                slot_seg = row.get("slot_segment")
+                if not row_valid_for_brain(row, wheel_seg):
                     continue
-                top = row.get("top_slot_multipliers") or []
-                bonus_data: Dict[str, Any] = {
-                    "slot_result": row.get("slot_result"),
-                    "wheel_result": row.get("wheel_result"),
-                    "slot_segment": row.get("slot_segment"),
-                    "wheel_segment": wheel_seg,
-                    "top_slot_multipliers": top,
-                }
-                mult: Optional[int] = None
-                if str(wheel_seg).isdigit():
-                    base = int(wheel_seg)
-                    bonus_data["base_wheel"] = base
-                    mult = max(top) if top else base
-                else:
-                    mult = max(top) if top else None
-                if mult is not None:
-                    brain.add_spin(segment=wheel_seg, multiplier=mult, mult_segment=wheel_seg, bonus_data=bonus_data)
-                else:
-                    brain.add_spin(segment=wheel_seg, bonus_data=bonus_data)
+                apply_brain_spin(brain, str(wheel_seg), slot_seg, row)
         _public_bootstrapped = True
 
     def _build_payload(source_ok: bool, source_error: Optional[str], new_rows_added: int) -> Dict[str, Any]:
@@ -1074,6 +1031,7 @@ async def auto_brain_public():
             "tracked_rows": len(state["seen"]),
             "latest_rows": rows_latest,
             "source_latest_time": (rows_latest[0].get("time") if rows_latest else None),
+            "source_latest_settled_utc": (rows_latest[0].get("settled_at_utc") if rows_latest else None),
             "source_consecutive_failures": int(state.get("consecutive_failures") or 0),
             "next_hot_signal": next_pick,
             "hot_signals": hot_signals,
@@ -1084,9 +1042,7 @@ async def auto_brain_public():
         }
 
     # Always return cached payload immediately if present.
-    with _public_lock:
-        cached = _public_cache.get("payload")
-        cached_ts = float(_public_cache.get("ts") or 0.0)
+    cached, cached_ts = public_cache_load()
 
     now = datetime.utcnow()
     should_poll = (not state.get("rows")) or (now - state["last_poll"]).total_seconds() >= 1
@@ -1127,39 +1083,16 @@ async def auto_brain_public():
                         source_error_local = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
 
                     for row in _rows_oldest_first(parsed_rows):
-                        dt = str(row.get("datetime_text") or row.get("time") or "").strip().lower()
-                        slot = str(row.get("slot_result") or "").strip().lower()
-                        wheel = str(row.get("wheel_result") or "").strip().lower()
-                        mults = row.get("top_slot_multipliers") or []
-                        mult_sig = ",".join(str(x) for x in mults)
-                        key = f"{dt}|{slot}|{wheel}|{mult_sig}"
+                        key = row_dedupe_key(row)
                         if key in state["seen"]:
                             continue
                         wheel_seg = row.get("wheel_segment") or row.get("segment")
                         slot_seg = row.get("slot_segment")
-
-                        if wheel_seg in ALL_SEGMENTS:
-                            top = row.get("top_slot_multipliers") or []
-                            bonus_data: Dict[str, Any] = {
-                                "slot_result": row.get("slot_result"),
-                                "wheel_result": row.get("wheel_result"),
-                                "slot_segment": slot_seg,
-                                "wheel_segment": wheel_seg,
-                                "top_slot_multipliers": top,
-                            }
-                            multiplier_to_send: Optional[int] = None
-                            if str(wheel_seg).isdigit():
-                                base = int(wheel_seg)
-                                bonus_data["base_wheel"] = base
-                                multiplier_to_send = max(top) if top else base
-                            else:
-                                multiplier_to_send = max(top) if top else None
-
-                            if multiplier_to_send is not None:
-                                brain.add_spin(segment=wheel_seg, multiplier=multiplier_to_send, mult_segment=wheel_seg, bonus_data=bonus_data)
-                            else:
-                                brain.add_spin(segment=wheel_seg, bonus_data=bonus_data)
-
+                        if not row_valid_for_brain(row, wheel_seg):
+                            logger.warning("auto_brain_public refresh: scarto riga wheel_seg=%s", wheel_seg)
+                            state["seen"].add(key)
+                            continue
+                        apply_brain_spin(brain, str(wheel_seg), slot_seg, row)
                         state["seen"].add(key)
                         new_count_local += 1
 
@@ -1168,12 +1101,7 @@ async def auto_brain_public():
                         existing_keys = {str(x.get("key")) for x in existing if isinstance(x, dict)}
                         now_ts = time.time()
                         for row in parsed_rows:
-                            dt = str(row.get("datetime_text") or row.get("time") or "").strip().lower()
-                            slot = str(row.get("slot_result") or "").strip().lower()
-                            wheel = str(row.get("wheel_result") or "").strip().lower()
-                            mults = row.get("top_slot_multipliers") or []
-                            mult_sig = ",".join(str(x) for x in mults)
-                            k2 = f"{dt}|{slot}|{wheel}|{mult_sig}"
+                            k2 = row_dedupe_key(row)
                             if k2 in existing_keys:
                                 continue
                             existing.append({"key": k2, "observed_at": now_ts, "row": row})
@@ -1193,14 +1121,10 @@ async def auto_brain_public():
                             await notify_hot_signals(payload_out_local.get("hot_signals") or [], source="public")
                         except Exception:
                             pass
-                    with _public_lock:
-                        _public_cache["payload"] = payload_out_local
-                        _public_cache["ts"] = time.time()
+                    public_cache_store(payload_out_local)
             except Exception as e:
                 payload_out_local = _build_payload(False, str(e), 0)
-                with _public_lock:
-                    _public_cache["payload"] = payload_out_local
-                    _public_cache["ts"] = time.time()
+                public_cache_store(payload_out_local)
             finally:
                 _public_refresh_lock.release()
 

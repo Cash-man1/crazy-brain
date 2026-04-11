@@ -67,10 +67,17 @@ git push origin main
 - `NOTIFY_SIGNALS_ENABLED` = `true`
 - `TELEGRAM_BOT_TOKEN` = token del bot
 - `TELEGRAM_BOT_USERNAME` = username bot (senza `@`)
-- `TELEGRAM_WEBHOOK_SECRET_TOKEN` = una stringa a tua scelta (consigliato)
+- `TELEGRAM_WEBHOOK_SECRET_TOKEN` = (opzionale) stesso valore che passi a `setWebhook` come `secret_token`
+- `TELEGRAM_WEBHOOK_STRICT_SECRET` = `true` solo se vuoi **rifiutare** richieste senza header secret (vedi sotto)
 
 #### Frontend (`crazy-brain-web`)
 - `VITE_API_URL` = URL pubblico del backend (es. `https://crazy-brain-api.onrender.com`)
+
+---
+
+## Deploy Render (guida completa)
+
+Vedi **[docs/RENDER_DEPLOY.md](docs/RENDER_DEPLOY.md)** (servizi, env, Redis, worker, domini, checklist).
 
 ---
 
@@ -83,9 +90,15 @@ Su Telegram apri **BotFather**, poi:
 - salva lo **username** del bot
 
 ### Imposta webhook
-Quando il backend è online, imposta il webhook così:
+Quando il backend è online, l’URL del webhook deve essere:
 
-`https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=<BACKEND_URL>/api/notify/telegram/webhook`
+`https://<BACKEND_URL>/api/notify/telegram/webhook`
+
+**Importante:** se imposti `TELEGRAM_WEBHOOK_SECRET_TOKEN` su Render, Telegram manda l’header `X-Telegram-Bot-Api-Secret-Token` **solo** se registri il webhook con lo stesso `secret_token` ([documentazione Telegram](https://core.telegram.org/bots/api#setwebhook)). Esempio (sostituisci token, URL e secret):
+
+`https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https%3A%2F%2F<host>%2Fapi%2Fnotify%2Ftelegram%2Fwebhook&secret_token=<STESSO_VALORE_DI_TELEGRAM_WEBHOOK_SECRET_TOKEN>`
+
+- Se il webhook era stato registrato **senza** `secret_token` ma in env c’è il secret, il backend rispondeva **403** (header assente). Ora, con `TELEGRAM_WEBHOOK_STRICT_SECRET=false` (default), le richieste senza header sono accettate ma conviene allineare `setWebhook` + env oppure impostare `TELEGRAM_WEBHOOK_STRICT_SECRET=true` dopo aver configurato correttamente il secret su Telegram.
 
 ---
 

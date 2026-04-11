@@ -2,7 +2,9 @@
 Crazy Brain SaaS - Main Application
 FastAPI backend con sicurezza enterprise-grade
 """
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -218,6 +220,22 @@ async def rate_limit_handler(request: Request, exc):
             "retry_after": 60
         },
         headers={"Retry-After": "60"}
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """In produzione non esporre stack trace; in development rilancia per il debugger."""
+    if isinstance(exc, HTTPException):
+        return await http_exception_handler(request, exc)
+    if isinstance(exc, RequestValidationError):
+        return await request_validation_exception_handler(request, exc)
+    if settings.ENVIRONMENT == "development":
+        raise exc
+    logger.exception("Unhandled error path=%s", request.url.path)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error"},
     )
 
 

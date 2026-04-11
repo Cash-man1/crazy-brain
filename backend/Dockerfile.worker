@@ -1,0 +1,11 @@
+# Worker leggero: solo httpx + redis (niente Playwright).
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+
+RUN pip install --no-cache-dir httpx==0.26.0 redis==5.0.1
+
+COPY crazytime_api.py live_rows_redis.py run_live_worker.py ./
+
+CMD ["python", "-u", "run_live_worker.py"]

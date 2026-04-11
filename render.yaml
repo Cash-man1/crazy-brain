@@ -32,6 +32,29 @@ services:
         sync: false
       - key: ADMIN_PHONE_PASSWORD
         sync: false
+      # Opzionale: cache JSON /brain/auto-brain-public su Redis (meno memoria sul web service).
+      - key: REDIS_URL
+        sync: false
+      # 1 = leggi prima le righe live da Redis (popolate dal worker sotto).
+      - key: LIVE_ROWS_FROM_REDIS
+        value: "0"
+      # 0 = non avviare Playwright nel container API (serve Dockerfile.api o Evolution/Redis ok).
+      - key: SCRAPER_PLAYWRIGHT_FALLBACK
+        value: "1"
+
+  # Worker leggero: solo httpx → Redis (vedi docs/RENDER_DEPLOY.md). Abilita LIVE_ROWS_FROM_REDIS=1 sull'API.
+  - type: worker
+    name: crazy-brain-live-worker
+    region: frankfurt
+    plan: free
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile.worker
+    dockerContext: ./backend
+    envVars:
+      - key: REDIS_URL
+        sync: false
+      - key: LIVE_WORKER_POLL_SECONDS
+        value: "4"
 
   - type: web
     name: crazy-brain-web

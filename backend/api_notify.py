@@ -4,6 +4,8 @@ Per-user notifications: Telegram connect + preferences.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -17,6 +19,7 @@ from security import get_current_user_id, hash_token, generate_secure_token
 
 settings = get_settings()
 router = APIRouter(prefix="/notify", tags=["Notifications"])
+logger = logging.getLogger(__name__)
 
 
 class NotifyPrefs(BaseModel):
@@ -108,6 +111,43 @@ class TelegramUpdate(BaseModel):
     message: Optional[dict] = None
 
 
+def _telegram_webhook_secret_ok(request: Request) -> None:
+    """
+    Telegram invia X-Telegram-Bot-Api-Secret-Token solo se setWebhook è stato chiamato
+    con lo stesso secret_token. Molti deploy hanno TELEGRAM_WEBHOOK_SECRET_TOKEN in env
+    ma webhook registrato senza secret → 403. Qui: header presente ⇒ deve coincidere sempre;
+    header assente ⇒ 403 solo in modalità strict.
+    """
+    expected = (settings.TELEGRAM_WEBHOOK_SECRET_TOKEN or "").strip()
+    if not expected:
+        return
+    hdr = (request.headers.get("X-Telegram-Bot-Api-Secret-Token") or "").strip()
+    if hdr:
+        if hdr != expected:
+            logger.warning(
+                "Telegram webhook: secret header presente ma non coincide con TELEGRAM_WEBHOOK_SECRET_TOKEN"
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="telegram_webhook_secret_mismatch",
+            )
+        return
+    if settings.TELEGRAM_WEBHOOK_STRICT_SECRET:
+        logger.warning(
+            "Telegram webhook: TELEGRAM_WEBHOOK_SECRET_TOKEN è impostato ma manca "
+            "X-Telegram-Bot-Api-Secret-Token. Riesegui setWebhook con secret_token uguale "
+            "all'env, oppure imposta TELEGRAM_WEBHOOK_STRICT_SECRET=false."
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="telegram_webhook_secret_header_missing",
+        )
+    logger.warning(
+        "Telegram webhook: accettato senza header secret (strict disattivo). "
+        "Per maggiore sicurezza usa setWebhook con secret_token e TELEGRAM_WEBHOOK_STRICT_SECRET=true."
+    )
+
+
 @router.post("/telegram/webhook")
 async def telegram_webhook(
     update: TelegramUpdate,
@@ -117,11 +157,7 @@ async def telegram_webhook(
     """
     Telegram webhook: user links their chat by sending /start <token>.
     """
-    # Optional secret token header (Telegram supports X-Telegram-Bot-Api-Secret-Token)
-    if settings.TELEGRAM_WEBHOOK_SECRET_TOKEN:
-        hdr = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-        if hdr != settings.TELEGRAM_WEBHOOK_SECRET_TOKEN:
-            raise HTTPException(status_code=403, detail="Forbidden")
+    _telegram_webhook_secret_ok(request)
 
     msg = update.message or {}
     text = str(msg.get("text") or "")

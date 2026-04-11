@@ -1,0 +1,12 @@
+# API senza Chromium/Playwright — richiede Evolution API e/o Redis worker (vedi docs/RENDER_DEPLOY.md).
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+
+COPY requirements-api.txt .
+RUN pip install --no-cache-dir -r requirements-api.txt
+
+COPY . .
+
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]

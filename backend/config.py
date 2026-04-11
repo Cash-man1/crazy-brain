@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./crazybrain.db"
+    # Opzionale: Redis (Render Redis, Upstash, ecc.) per cache JSON /auto-brain-public fuori dalla RAM del web service.
+    REDIS_URL: str = ""
     
     # Sicurezza JWT
     SECRET_KEY: str = "CHANGE_ME_IN_PRODUCTION_MIN_32_CHARS"
@@ -52,6 +54,10 @@ class Settings(BaseSettings):
     # Lista chat id separati da virgola (es. "12345678,-1001234567890")
     TELEGRAM_CHAT_IDS: str = ""
     TELEGRAM_WEBHOOK_SECRET_TOKEN: str = ""
+    # Se true e TELEGRAM_WEBHOOK_SECRET_TOKEN è valorizzato: Telegram deve inviare
+    # X-Telegram-Bot-Api-Secret-Token (setWebhook con secret_token). Se false, header
+    # assente è accettato (utile se il webhook è stato registrato senza secret).
+    TELEGRAM_WEBHOOK_STRICT_SECRET: bool = False
     # Soglia minima confidence per invio (0-1)
     NOTIFY_MIN_CONFIDENCE: float = 0.45
     
