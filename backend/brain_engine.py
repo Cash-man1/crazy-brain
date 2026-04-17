@@ -705,16 +705,53 @@ class MiniBrain:
         return 6 if self.segment == "CT" else 9
 
     def _adapt_range_max_from_learning(self) -> int:
-        """Abbassa (o rialza dentro il tetto) il range in base alla media dei giri fino all'hit in attacco."""
+        """
+        Tetto giri in attacco: finestra che si accorcia con l'esperienza (non stupida).
+
+        Usa i `learned_hit_spins` (giri dall'ingresso in attacco all'uscita del segmento).
+        - media pesata (recenti contano di piu) + mediana su finestra recente = centro robusto;
+        - margine sopra il centro: parte comodo, si riduce con piu campioni, piu successi negli
+          attacchi e piu confidence efficace (stesso concetto: piu dati / piu coerenza => meno buffer);
+        - il tetto `base` (9 o 6 CT) si abbassa di 1-2 solo se mediana e media recenti lo giustificano,
+          cosi non resti sempre 8/9 quando in realta gli hit arrivano prima.
+        """
         base = self._base_range_max()
-        samples = self.state.learned_hit_spins
+        samples = list(self.state.learned_hit_spins)
+        floor_r = 3 if self.segment == "CT" else 4
         if len(samples) < 3:
             return base
-        mean_spins = weighted_mean_spins(samples, max_take=15, half_life=RANGE_LEARN_HALF_LIFE_SAMPLES)
-        # Piccolo margine sopra la media osservata (non stringere troppo al primo colpo).
-        target = int(math.ceil(mean_spins + 0.75))
-        floor_r = 3 if self.segment == "CT" else 4
-        return max(floor_r, min(base, target))
+
+        mean_spins = weighted_mean_spins(
+            samples, max_take=18, half_life=RANGE_LEARN_HALF_LIFE_SAMPLES
+        )
+        recent = samples[-18:]
+        med = float(statistics.median(recent))
+        blended = 0.42 * mean_spins + 0.58 * med
+
+        att = max(0, int(self.state.attempts))
+        succ = max(0, int(self.state.successes))
+        sr = succ / att if att > 0 else 0.0
+        n = len(samples)
+        eff = mini_brain_effective_confidence(self.state)
+
+        margin = 0.86
+        margin -= min(0.38, 0.03 * n)
+        margin -= min(0.22, 0.32 * max(0.0, sr - 0.32))
+        margin -= min(0.32, 0.48 * eff * min(1.0, n / 10.0))
+        margin = max(0.20, margin)
+
+        target = int(math.ceil(blended + margin))
+
+        hard_cap = base
+        if n >= 10 and eff >= 0.50 and med <= base - 1.75 and mean_spins <= base - 0.85:
+            hard_cap = max(floor_r + 2, base - 1)
+        if n >= 16 and eff >= 0.58 and med <= base - 2.5 and mean_spins <= base - 1.4:
+            hard_cap = max(floor_r + 2, min(hard_cap, base - 2))
+
+        if att >= 12 and n >= 10 and sr >= 0.40 and blended <= 6.5:
+            floor_r = max(3, floor_r - 1)
+
+        return max(floor_r, min(hard_cap, target))
 
     def _enter_attack(self, spin_count: int):
         """Entra in fase di attacco"""
