@@ -171,7 +171,7 @@ export default function LiveDashboardNoAuth() {
                 </button>
                 <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                   <Link className="btn btn-primary" to="/connect">
-                    Collega Telegram / preferenze segnali
+                    Segnali su Telegram (config bot)
                   </Link>
                   <InstagramMarkLink
                     href={instagramHref}
@@ -183,7 +183,8 @@ export default function LiveDashboardNoAuth() {
                     className="btn btn-secondary"
                   />
                   <div className="description" style={{ marginLeft: 4 }}>
-                    Modalita desktop diretta: login disattivato
+                    I segnali via Telegram: vedi <strong>/connect</strong> — solo variabili sul backend, nessun login
+                    nell’app.
                   </div>
                 </div>
               </div>

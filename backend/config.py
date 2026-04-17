@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     TELEGRAM_WEBHOOK_STRICT_SECRET: bool = False
     # Soglia minima confidence per invio (0-1)
     NOTIFY_MIN_CONFIDENCE: float = 0.45
+    # Solo per TELEGRAM_CHAT_IDS (broadcast .env): CSV segmenti da notificare; vuoto = tutti
+    NOTIFY_BROADCAST_SEGMENTS: str = ""
     
     # Rate Limiting
     RATE_LIMIT_REGISTER: str = "5/minute"

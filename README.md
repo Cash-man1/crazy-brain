@@ -2,15 +2,15 @@
 
 Applicazione web per **analisi e segnali** su Crazy Time (casino live): **frontend** in `frontend/`, **backend** API in `backend/`.
 
-Può inviare avvisi su **Telegram** (OTP per account telefono, e opzionalmente **notifiche segnali**).
+Può inviare **notifiche segnali** su **Telegram** tramite bot (config in `backend/.env`, senza login nell’app).
 
 ---
 
 ## Indice (parti da qui se non sai da dove iniziare)
 
 1. [Prima volta sul PC (Windows)](#1-prima-volta-sul-pc-windows) — far partire l’app in locale  
-2. [Telegram: cosa serve e in che ordine](#2-telegram-cosa-serve-e-in-che-ordine) — bot, webhook, `.env`, notifiche  
-3. [Usare l’app nel browser](#3-usare-lapp-nel-browser) — dashboard pubblica vs account  
+2. [Telegram: segnali senza login nell’app](#2-telegram-segnali-senza-login-nellapp) — bot, `.env`, notifiche  
+3. [Usare l’app nel browser](#3-usare-lapp-nel-browser) — dashboard e `/connect`  
 4. [Pubblicare su GitHub e Render](#4-pubblicare-su-github-e-render)  
 5. [Note su dati e sicurezza](#5-note-su-dati-e-sicurezza)
 
@@ -58,14 +58,15 @@ Si aprono di solito **due finestre**:
 
 ---
 
-## 2) Telegram: cosa serve e in che ordine
+## 2) Telegram: segnali senza login nell’app
 
-Telegram viene usato per **due cose diverse**. Convince se le separi mentalmente:
+L’interfaccia **non** usa più form di login/registrazione per i segnali: configuri il **bot** e i **chat id** nel `backend/.env`. Nella dashboard apri **`/connect`** per la guida testuale.
 
-| Cosa | A cosa serve | Serve il webhook? |
-|------|----------------|---------------------|
-| **OTP / collegamento account** | Registrazione o login con **numero di telefono**: ricevi il codice sul bot | **Sì** — Telegram deve poter chiamare il tuo backend |
-| **Notifiche segnali** | Messaggi tipo “segnale su segmento X” quando il cervello trova qualcosa di caldo | **No** per l’invio (il server chiama Telegram); il webhook serve solo se vuoi che l’utente **colleghi** la chat dall’app con `/start` |
+| Cosa | Note |
+|------|------|
+| **Segnali caldi** | `NOTIFY_SIGNALS_ENABLED=true` + token bot + `TELEGRAM_CHAT_IDS` (vedi sotto) |
+| **Solo alcuni segmenti** (broadcast `.env`) | Opzionale: `NOTIFY_BROADCAST_SEGMENTS=1,2,CH` |
+| **Webhook HTTPS** | Solo se usi ancora flussi OTP/utenti DB; **non** serve solo per `TELEGRAM_CHAT_IDS` |
 
 ### Passo A — Crea il bot (una volta)
 
@@ -83,73 +84,25 @@ Telegram viene usato per **due cose diverse**. Convince se le separi mentalmente
 ```env
 TELEGRAM_BOT_TOKEN=il_token_che_ti_ha_dato_botfather
 TELEGRAM_BOT_USERNAME=nome_utente_bot_senza_chiocciola
+NOTIFY_SIGNALS_ENABLED=true
+NOTIFY_MIN_CONFIDENCE=0.45
+TELEGRAM_CHAT_IDS=IL_TUO_CHAT_ID
+# Opzionale: solo questi segmenti verso TELEGRAM_CHAT_IDS
+# NOTIFY_BROADCAST_SEGMENTS=1,2,CH
 ```
 
 Salva il file. **Riavvia** il backend (`avvio.bat` o il terminale dove gira `uvicorn`) dopo ogni modifica a `.env`.
 
-### Passo C — Webhook (obbligatorio per “Collega Telegram” nell’app)
+**Chat id:** chiedilo a bot come `@userinfobot` o `@getidsbot` su Telegram. In `frontend/.env`, `VITE_TELEGRAM_BOT_USERNAME` (senza `@`) mostra il pulsante “Apri bot” in `/connect`.
 
-Il backend deve essere **raggiungibile da Internet** con un URL **HTTPS** (in locale spesso usi **ngrok** o simili; su Render hai già l’HTTPS).
+### Passo C — Webhook (solo se usi OTP / utenti in database)
 
-L’URL del webhook è sempre questo path sul **tuo** dominio API:
+Se ti serve collegare la chat a un utente nel DB con `/start`, serve HTTPS e `setWebhook` verso  
+`https://<TUO_BACKEND>/api/notify/telegram/webhook` — vedi **[docs/RENDER_DEPLOY.md](docs/RENDER_DEPLOY.md)**.
 
-`https://<TUO_BACKEND_PUBBLICO>/api/notify/telegram/webhook`
+### Passo D — (Opzionale) API login telefono
 
-**Esempio** (sostituisci `TOKEN`, `HOST` e opzionalmente `SECRET`):
-
-```text
-https://api.telegram.org/botTOKEN/setWebhook?url=https%3A%2F%2FHOST%2Fapi%2Fnotify%2Ftelegram%2Fwebhook&secret_token=SECRET
-```
-
-- Incolla l’URL completo nel **browser** oppure usa curl.  
-- Se usi `secret_token`, metti **lo stesso valore** in `backend\.env` come `TELEGRAM_WEBHOOK_SECRET_TOKEN`.  
-- Se Telegram non manda l’header del secret, con `TELEGRAM_WEBHOOK_STRICT_SECRET=false` (default nel progetto) il backend accetta comunque; in produzione conviene allineare bene secret e webhook.
-
-Dopo il `setWebhook`, in Telegram apri il bot e prova **START** dal link che genera l’app (vedi sotto): se il webhook è giusto, il backend riesce a salvare il tuo **chat id** sul profilo utente.
-
-### Passo D — Due modi per ricevere i **segnali** su Telegram
-
-**Modo 1 — Sei registrato nell’app (consigliato se usi login)**
-
-1. Avvia backend + frontend  
-2. Accedi all’app (account con telefono + password, dopo OTP)  
-3. Vai alla pagina **`/connect`** (menu “Collega Telegram / preferenze segnali” se presente)  
-4. Genera il link, aprilo in Telegram, premi **START** (questo collega la **chat** al tuo account)  
-5. Nell’app attiva le notifiche e scegli i **segmenti** che ti interessano  
-
-Il backend invia solo se in `.env` hai anche:
-
-```env
-NOTIFY_SIGNALS_ENABLED=true
-NOTIFY_MIN_CONFIDENCE=0.45
-```
-
-(`NOTIFY_MIN_CONFIDENCE` è la soglia minima di “confidence” per spedire; puoi alzarla o abbassarla.)
-
-**Modo 2 — Solo file `.env` (utile per dashboard pubblica in locale, senza DB utente)**
-
-Aggiungi in **`backend\.env`**:
-
-```env
-NOTIFY_SIGNALS_ENABLED=true
-TELEGRAM_CHAT_IDS=123456789
-```
-
-- `123456789` è un **esempio**: al suo posto metti il **tuo chat id** (numero intero come stringa).  
-- Più chat: separa con virgola, es. `111111111,222222222`.  
-- Per scoprire il tuo id: scrivi a bot come `@userinfobot` o `@getidsbot` su Telegram, oppure guarda i log quando fai START sul tuo bot (se hai logging attivo).
-
-In questo modo il server manda i segnali caldi anche **senza** aver creato l’utente collegato in database.
-
-### Passo E — Registrazione telefono + OTP (richiede bot + webhook)
-
-1. Vai su **Login** → modalità **telefono**  
-2. **Collega Telegram** (obbligatorio per ricevere OTP)  
-3. Apri il link → **START** sul bot  
-4. Torna in app → **Invia OTP su Telegram**  
-5. Inserisci OTP e scegli password  
-
-**Nota:** premere START sul bot **da solo** **non** attiva le notifiche segnali: per quelle serve **`/connect`** o `TELEGRAM_CHAT_IDS` come sopra.
+Le route backend per OTP/login restano; in questa versione **non** c’è pagina login nel frontend (solo dashboard + `/connect` guida).
 
 ---
 
@@ -159,7 +112,7 @@ In questo modo il server manda i segnali caldi anche **senza** aver creato l’u
   `http://localhost:5173/dashboard`  
   Mostra ultimi esiti, mini cervelli, statistiche live (secondo configurazione API pubblica).
 
-- **Funzioni con account** (abbonamento / Stripe / profilo / `/connect`) — segui le route dell’app (es. `/login`, `/connect`).
+- **`/connect`** — guida per configurare il bot Telegram e le variabili `.env` (nessun form di login).
 
 Se il frontend non parla col backend, controlla **`frontend\.env`**: deve esserci qualcosa come `VITE_API_URL=http://127.0.0.1:8000`.
 

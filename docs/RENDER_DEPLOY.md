@@ -86,6 +86,7 @@ Come da `.env.example` se usi pagamenti e reset mail.
 | `TELEGRAM_BOT_TOKEN` | Da BotFather |
 | `TELEGRAM_BOT_USERNAME` | Senza `@` |
 | `TELEGRAM_CHAT_IDS` | Opzionale: CSV di **chat id** (notifiche anche senza utente collegato in DB) |
+| `NOTIFY_BROADCAST_SEGMENTS` | Opzionale: CSV segmenti (solo per invii verso `TELEGRAM_CHAT_IDS`); vuoto = tutti |
 | `TELEGRAM_WEBHOOK_SECRET_TOKEN` | Opzionale ma consigliato: **stesso** valore in `setWebhook?secret_token=` |
 | `TELEGRAM_WEBHOOK_STRICT_SECRET` | `true` solo dopo aver allineato webhook e env |
 

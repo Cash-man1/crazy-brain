@@ -86,9 +86,9 @@ export default function ForgotPassword() {
           )}
 
           <div className="auth-links">
-            <Link to="/login" className="auth-link" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+            <Link to="/dashboard" className="auth-link" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
               <ArrowLeft size={16} />
-              Torna al login
+              Torna alla dashboard
             </Link>
           </div>
         </div>

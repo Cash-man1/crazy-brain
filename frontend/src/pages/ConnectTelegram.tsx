@@ -1,182 +1,93 @@
-import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-api.onrender.com'
-
-const SEGMENTS = ['1', '2', '5', '10', 'CH', 'CF', 'PA', 'CT'] as const
-
-function authHeader() {
-  const t = localStorage.getItem('token')
-  return t ? { Authorization: `Bearer ${t}` } : {}
-}
+const BOT_USER = (import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string | undefined)?.trim().replace(/^@/, '') || ''
 
 export default function ConnectTelegram() {
-  const [status, setStatus] = useState<{ connected: boolean; notify_enabled: boolean; notify_segments: string } | null>(null)
-  const [connectUrl, setConnectUrl] = useState('')
-  const [enabled, setEnabled] = useState(true)
-  const [selected, setSelected] = useState<Record<string, boolean>>({})
-  const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const selectedSegments = useMemo(() => {
-    const out: string[] = []
-    for (const s of SEGMENTS) if (selected[s]) out.push(s)
-    return out
-  }, [selected])
-
-  const load = async () => {
-    setError('')
-    try {
-      const res = await fetch(`${API_URL}/api/notify/telegram/status`, { headers: { ...authHeader() } })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.detail || 'Failed')
-      setStatus(data)
-      setEnabled(Boolean(data.notify_enabled))
-      const segCsv = String(data.notify_segments || '')
-      const set = new Set(segCsv.split(',').map((x) => x.trim()).filter(Boolean))
-      const next: Record<string, boolean> = {}
-      for (const s of SEGMENTS) next[s] = set.size ? set.has(s) : true
-      setSelected(next)
-    } catch (e: any) {
-      setError(e?.message || 'Error')
-    }
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
-
-  const generateLink = async () => {
-    setError('')
-    try {
-      const res = await fetch(`${API_URL}/api/notify/telegram/connect-link`, { method: 'POST', headers: { ...authHeader() } })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.detail || 'Failed to create link')
-      setConnectUrl(data.connect_url)
-    } catch (e: any) {
-      setError(e?.message || 'Error')
-    }
-  }
-
-  const savePrefs = async () => {
-    setSaving(true)
-    setError('')
-    try {
-      const segments = selectedSegments.length === SEGMENTS.length ? [] : selectedSegments
-      const res = await fetch(`${API_URL}/api/notify/preferences`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader() },
-        body: JSON.stringify({ enabled, segments })
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.detail || 'Save failed')
-      await load()
-    } catch (e: any) {
-      setError(e?.message || 'Error')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const toggleAll = (v: boolean) => {
-    const next: Record<string, boolean> = {}
-    for (const s of SEGMENTS) next[s] = v
-    setSelected(next)
-  }
-
-  const disconnected = status && !status.connected
+  const botHref = BOT_USER ? `https://t.me/${BOT_USER}` : ''
 
   return (
     <div className="dashboard dashboard--live-full">
       <main className="dashboard-content dashboard-content--live">
         <div className="container container--live-full">
           <div className="welcome-section live-welcome-tight">
-            <h1>Collega Telegram</h1>
-            <p>
-              Telegram serve per 2 cose diverse:
-              <br />
-              - OTP (obbligatorio): per ricevere il codice devi premere <strong>START</strong> sul bot
-              <br />
-              - Notifiche segnali (opzionale): si attivano solo con il toggle qui sotto
+            <h1>Segnali su Telegram (solo bot)</h1>
+            <p className="description" style={{ maxWidth: 720, lineHeight: 1.55 }}>
+              Non serve account nell’app: il backend invia i messaggi al **bot Telegram** che hai creato con
+              BotFather, verso la **tua chat** (il tuo <strong>chat id</strong> numerico).
             </p>
           </div>
 
-          {error && <div className="error-message">{error}</div>}
+          <div className="status-card" style={{ marginBottom: 14 }}>
+            <h3 className="live-panel-title" style={{ marginBottom: 10 }}>
+              1) Apri <code style={{ fontSize: '0.9em' }}>backend/.env</code> (o le variabili su Render)
+            </h3>
+            <p className="description" style={{ marginBottom: 10 }}>
+              Imposta almeno queste righe (token e username li copi da BotFather):
+            </p>
+            <pre
+              style={{
+                background: 'rgba(0,0,0,0.35)',
+                padding: 14,
+                borderRadius: 8,
+                overflow: 'auto',
+                fontSize: '0.88rem',
+                lineHeight: 1.45,
+                border: '1px solid rgba(255,255,255,0.12)',
+              }}
+            >
+              {`NOTIFY_SIGNALS_ENABLED=true
+TELEGRAM_BOT_TOKEN=il_token_del_bot
+TELEGRAM_BOT_USERNAME=nome_bot_senza_chiocciola
+TELEGRAM_CHAT_IDS=IL_TUO_CHAT_ID
+NOTIFY_MIN_CONFIDENCE=0.45
 
-          {!localStorage.getItem('token') ? (
-            <div className="status-card">
-              <div className="description">Devi fare login prima.</div>
-              <Link to="/login" className="auth-link gold">
-                Vai al login
-              </Link>
-            </div>
-          ) : (
-            <>
-              <div className="status-card" style={{ marginBottom: 12 }}>
-                <div className="description">
-                  Stato: <strong>{status?.connected ? 'Collegato' : 'Non collegato'}</strong>
-                </div>
-                <button className="btn btn-primary" type="button" onClick={generateLink}>
-                  Genera link Telegram
-                </button>
+# Opzionale: solo certi segmenti verso TELEGRAM_CHAT_IDS (CSV, es. 1,2,CH)
+# NOTIFY_BROADCAST_SEGMENTS=1,2,CH`}
+            </pre>
+            <p className="description" style={{ marginTop: 12 }}>
+              Poi <strong>riavvia il backend</strong> (chiudi la finestra uvicorn e rilancia <code>avvio.bat</code> o il
+              comando che usi).
+            </p>
+          </div>
 
-                {connectUrl && (
-                  <div style={{ marginTop: 10 }}>
-                    <div className="description" style={{ marginBottom: 6 }}>
-                      1) Apri il link sotto 2) premi START sul bot.
-                    </div>
-                    <a href={connectUrl} target="_blank" rel="noreferrer" style={{ wordBreak: 'break-all' }}>
-                      {connectUrl}
-                    </a>
-                    <div className="description" style={{ marginTop: 8 }}>
-                      Poi torna qui e attiva le notifiche.
-                    </div>
-                  </div>
-                )}
-              </div>
+          <div className="status-card" style={{ marginBottom: 14 }}>
+            <h3 className="live-panel-title" style={{ marginBottom: 10 }}>
+              2) Scopri il tuo chat id
+            </h3>
+            <p className="description">
+              Su Telegram apri un bot come <strong>@userinfobot</strong> o <strong>@getidsbot</strong>, invia un
+              messaggio: ti risponde con il numero da mettere in <code>TELEGRAM_CHAT_IDS</code>. Più chat: separa con
+              virgola.
+            </p>
+          </div>
 
-              <div className="status-card" style={{ marginBottom: 12 }}>
-                <label style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-                  <strong>Attiva notifiche</strong>
-                </label>
+          <div className="status-card" style={{ marginBottom: 14 }}>
+            <h3 className="live-panel-title" style={{ marginBottom: 10 }}>
+              3) (Opzionale) Apri il bot
+            </h3>
+            <p className="description" style={{ marginBottom: 10 }}>
+              Per ricevere messaggi il bot deve poter scriverti; aprirlo e premere <strong>START</strong> non basta da
+              solo per salvare l’id nel server — l’id va nel <code>.env</code> come sopra.
+            </p>
+            {botHref ? (
+              <a className="btn btn-primary" href={botHref} target="_blank" rel="noopener noreferrer">
+                Apri @{BOT_USER} su Telegram
+              </a>
+            ) : (
+              <p className="description">
+                Per mostrare qui il pulsante “Apri bot”, aggiungi in <code>frontend/.env</code>:{' '}
+                <code>VITE_TELEGRAM_BOT_USERNAME=nome_del_tuo_bot</code> (senza @) e riavvia Vite.
+              </p>
+            )}
+          </div>
 
-                <div className="description" style={{ marginTop: 8 }}>
-                  Se selezioni tutti i segmenti, verrà salvato come “tutti”.
-                </div>
-
-                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                  <button className="btn" type="button" onClick={() => toggleAll(true)}>
-                    Tutti
-                  </button>
-                  <button className="btn" type="button" onClick={() => toggleAll(false)}>
-                    Nessuno
-                  </button>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginTop: 12 }}>
-                  {SEGMENTS.map((s) => (
-                    <label key={s} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(selected[s])}
-                        onChange={(e) => setSelected((p) => ({ ...p, [s]: e.target.checked }))}
-                      />
-                      {s}
-                    </label>
-                  ))}
-                </div>
-
-                <button className="btn btn-primary" type="button" onClick={savePrefs} disabled={saving || !status?.connected}>
-                  {saving ? 'Salvataggio...' : 'Salva preferenze'}
-                </button>
-                {disconnected && <div className="description">Collega prima Telegram per salvare e ricevere messaggi.</div>}
-              </div>
-            </>
-          )}
+          <div className="status-card">
+            <Link to="/dashboard" className="btn btn-secondary">
+              Torna alla dashboard
+            </Link>
+          </div>
         </div>
       </main>
     </div>
   )
 }
-

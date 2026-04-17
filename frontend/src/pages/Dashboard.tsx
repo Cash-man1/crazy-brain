@@ -93,7 +93,7 @@ export default function Dashboard() {
 
   const handleLogout = () => {
     logout()
-    navigate('/login')
+    navigate('/dashboard')
   }
 
   const handleSubscribe = async () => {

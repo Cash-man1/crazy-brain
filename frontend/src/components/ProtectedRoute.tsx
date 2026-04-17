@@ -10,7 +10,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
   }
 
   if (!token || !user) {
-    return <Navigate to="/login" replace />
+    return <Navigate to="/dashboard" replace />
   }
 
   return <>{children}</>

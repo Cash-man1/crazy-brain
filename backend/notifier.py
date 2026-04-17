@@ -95,11 +95,12 @@ async def notify_hot_signals(hot_signals: List[Dict[str, Any]], source: str = "p
         allowed = _parse_segments_csv(u.get("notify_segments") or "")
         targets.append((chat_id, allowed, f"u{u.get('id')}"))
 
+    broadcast_allowed = _parse_segments_csv(settings.NOTIFY_BROADCAST_SEGMENTS or "")
     for cid in _parse_telegram_chat_ids_csv(settings.TELEGRAM_CHAT_IDS):
         if cid in seen_chat:
             continue
         seen_chat.add(cid)
-        targets.append((cid, set(), f"env:{cid}"))
+        targets.append((cid, broadcast_allowed, f"env:{cid}"))
 
     if not targets:
         return

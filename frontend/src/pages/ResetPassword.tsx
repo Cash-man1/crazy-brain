@@ -40,7 +40,7 @@ export default function ResetPassword() {
         throw new Error(Array.isArray(msg) ? msg.join(', ') : String(msg))
       }
       setSuccess(true)
-      window.setTimeout(() => navigate('/login'), 1200)
+      window.setTimeout(() => navigate('/dashboard'), 1200)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -70,7 +70,7 @@ export default function ResetPassword() {
           {success ? (
             <div className="success-message">
               <CheckCircle size={18} />
-              Password aggiornata. Reindirizzamento al login…
+              Password aggiornata. Reindirizzamento alla dashboard…
             </div>
           ) : (
             <form onSubmit={handleSubmit}>
@@ -99,12 +99,12 @@ export default function ResetPassword() {
 
           <div className="auth-links">
             <Link
-              to="/login"
+              to="/dashboard"
               className="auth-link"
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
             >
               <ArrowLeft size={16} />
-              Torna al login
+              Torna alla dashboard
             </Link>
           </div>
         </div>
