@@ -572,7 +572,8 @@ def _clean_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         top = row.get("top_slot_multipliers") or []
         max_m = row.get("max_multiplier")
         top_only = row.get("top_slot_multiplier")
-        # Moltiplicatore finale mostrato in UI: preferisci payout max da Evolution, altrimenti euristica legacy.
+        # Colonna "Moltip.": Evolution espone maxMultiplier; dalla tabella HTML spesso compaiono piu "Nx"
+        # nella stessa cella (es. boost slot + finale): per allinearsi al sito usiamo l'ultimo, non il max.
         final_mult: Optional[int] = None
         if max_m is not None:
             try:
@@ -580,7 +581,9 @@ def _clean_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             except (TypeError, ValueError):
                 final_mult = None
         if final_mult is None and top:
-            final_mult = max(int(x) for x in top if x is not None)
+            ints = [int(x) for x in top if x is not None]
+            if ints:
+                final_mult = ints[-1]
         elif final_mult is None and wheel_seg and str(wheel_seg).isdigit():
             final_mult = int(wheel_seg)
         cleaned.append(
@@ -982,7 +985,8 @@ async def auto_brain_public():
         if persisted:
             # Rebuild state rows and brain spins oldest->newest.
             with _public_state_lock:
-                state["rows"] = [it.get("row") for it in persisted if isinstance(it.get("row"), dict)]
+                raw_hist = [it.get("row") for it in persisted if isinstance(it.get("row"), dict)]
+                state["rows"] = _clean_rows(raw_hist)
                 state["seen"] = set(
                     str(it.get("key")) for it in persisted if isinstance(it.get("key"), str) and it.get("key")
                 )

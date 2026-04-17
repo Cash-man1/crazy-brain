@@ -18,7 +18,8 @@ def _max_mult_in_row(row: Dict[str, Any]) -> int:
     top = row.get("top_slot_multipliers") or []
     if isinstance(top, list) and top:
         try:
-            return int(max(int(x) for x in top))
+            ints = [int(x) for x in top]
+            return int(ints[-1])
         except (TypeError, ValueError):
             pass
     ws = row.get("wheel_segment") or row.get("segment")

@@ -70,7 +70,9 @@ def clean_one(row: Dict[str, Any]) -> Dict[str, Any]:
         except (TypeError, ValueError):
             final_mult = None
     if final_mult is None and top:
-        final_mult = max(int(x) for x in top if x is not None)
+        ints = [int(x) for x in top if x is not None]
+        if ints:
+            final_mult = ints[-1]
     elif final_mult is None and wheel_seg and str(wheel_seg).isdigit():
         final_mult = int(wheel_seg)
     return {

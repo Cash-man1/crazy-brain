@@ -20,16 +20,10 @@ function displayRowTime(r: any): string {
   return t || '—'
 }
 
-/** Una sola colonna come "Moltip." sul sito: moltiplicatore finale, non lista Top Slot + finale. */
+/** Allineato alla colonna "Moltip." del sito: solo moltiplicatore finale (da backend). */
 function displayFinalMultiplier(r: any): string {
   const fm = r?.final_multiplier
   if (fm != null && fm !== '') return `${fm}x`
-  const tops = r?.top_slot_multipliers || []
-  if (Array.isArray(tops) && tops.length === 1) return `${tops[0]}x`
-  if (Array.isArray(tops) && tops.length > 1) {
-    const nums = tops.map((x: any) => Number(x)).filter((n: number) => !Number.isNaN(n))
-    if (nums.length) return `${Math.max(...nums)}x`
-  }
   return '—'
 }
 
