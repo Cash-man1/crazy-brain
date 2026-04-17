@@ -29,7 +29,9 @@ set SCRAPER_USE_EVOLUTION_API=1
 :: Se Evolution fallisce, usa Playwright ^(richiede chromium da setup.bat^)
 set SCRAPER_PLAYWRIGHT_FALLBACK=1
 :: Ore di cronologia da selezionare sulla pagina casino (1,6,12,24,48,72) quando usi Playwright
-set SCRAPER_CRONOLOGIA_HOURS=24
+set SCRAPER_CRONOLOGIA_HOURS=72
+:: Storico persistito su disco (max righe in public_history.json)
+set PUBLIC_HISTORY_MAX_ITEMS=5000
 
 if not exist "frontend\.env" (
   > "frontend\.env" echo VITE_API_URL=http://127.0.0.1:8000
