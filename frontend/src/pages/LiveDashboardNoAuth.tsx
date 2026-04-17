@@ -3,22 +3,9 @@ import { Link } from 'react-router-dom'
 import { Brain } from 'lucide-react'
 import LegalFooter from '../components/LegalFooter'
 import { INSTAGRAM_URL } from '../config/social'
-import { formatItalyFromBackendIso, formatItalyShortFromIso } from '../lib/formatTime'
+import { formatItalyFromBackendIso, formatItalyTableRowTime } from '../lib/formatTime'
 
 const DEFAULT_HISTORY_CAP = 5000
-
-function displayRowTime(r: any): string {
-  const dt = String(r?.datetime_text || '').trim()
-  // Playwright: stesso testo riga della tabella casino (es. "17 Apr 18:27")
-  if (dt.length > 8 && /\d/.test(dt)) return dt
-  const iso = r?.settled_at_utc
-  if (iso) {
-    const s = formatItalyShortFromIso(iso)
-    if (s) return s
-  }
-  const t = String(r?.time || '').trim()
-  return t || '—'
-}
 
 /** Allineato alla colonna "Moltip." del sito: solo moltiplicatore finale (da backend). */
 function displayFinalMultiplier(r: any): string {
@@ -423,7 +410,7 @@ export default function LiveDashboardNoAuth() {
                         return (
                           <tr key={`${r.time}-${r.segment}-${idx}`}>
                             <td title={r.settled_at_utc ? formatItalyFromBackendIso(r.settled_at_utc) : undefined}>
-                              {displayRowTime(r)}
+                              {formatItalyTableRowTime(r)}
                             </td>
                             <td>
                               {r.slot_icon ? (
