@@ -113,6 +113,23 @@ oppure
 
 ---
 
-## Nota importante su casino.org
-In produzione su Render **nessuno vedrà** la pagina `casino.org`.
-Quella era una cosa solo locale (gli script locali non vengono caricati su GitHub).
+## Sviluppo desktop (Windows) — `setup.bat` + `avvio.bat`
+
+Per usare Crazy Brain **in locale** come prima (backend + frontend, ultimi esiti / orari dalla stessa logica di produzione):
+
+1. Doppio clic o da terminale: **`setup.bat`** (una volta) — crea `.venv`, installa backend + Playwright Chromium + `npm ci` nel frontend, crea `backend\.env` e `frontend\.env` se mancano.
+2. Poi: **`avvio.bat`** — apre due finestre: API su `http://127.0.0.1:8000` e Vite (di solito `http://localhost:5173`).
+
+Impostazioni predefinite in `avvio.bat`:
+
+- **`SCRAPER_USE_EVOLUTION_API=1`** — stessa API JSON usata in produzione (ultimi round, orari coerenti, leggero).
+- **`SCRAPER_PLAYWRIGHT_FALLBACK=1`** — se l’API non risponde, usa Playwright sulla pagina `casino.org` (serve Chromium installato da `setup.bat`).
+
+Se vuoi **solo** la lettura della pagina HTML (niente API): in `avvio.bat` imposta `SCRAPER_USE_EVOLUTION_API=0`.
+
+I file `.bat` sono **nel repository** così il flusso desktop è ripetibile anche dopo clone da GitHub.
+
+---
+
+## Nota su casino.org e produzione
+In produzione su Render la dashboard usa soprattutto l’**API Evolution** (e opzionalmente Redis/worker), non il browser sul sito `casino.org`. **In locale**, con `avvio.bat`, puoi comunque avere il fallback Playwright sulla pagina reale se l’API fallisce.

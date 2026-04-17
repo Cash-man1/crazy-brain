@@ -73,8 +73,6 @@ logs/
 .cache/
 
 # Local-only scripts / artifacts
-avvio.bat
-setup.bat
 open-dual-fullscreen.ps1
 risultato\ esito\ ruota/
 top\ slot/
