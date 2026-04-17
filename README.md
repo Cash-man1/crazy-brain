@@ -127,7 +127,7 @@ Impostazioni predefinite in `avvio.bat`:
 
 Se vuoi **solo** la lettura della pagina HTML (niente API): in `avvio.bat` imposta `SCRAPER_USE_EVOLUTION_API=0`.
 
-**Cronologia casino (Playwright):** in `avvio.bat` c’è `SCRAPER_CRONOLOGIA_HOURS` (default **`72`**) per allineare il lasso temporale al menu del sito. **Storico salvato in locale:** fino a `PUBLIC_HISTORY_MAX_ITEMS` (default **5000**) in `backend/public_history.json`; i **pattern** restano in `backend/public_patterns.json` e si ricaricano al riavvio.
+**Cronologia casino (Playwright):** in `avvio.bat` c’è `SCRAPER_CRONOLOGIA_HOURS` (default **`72`**) per allineare il lasso temporale al menu del sito. **Storico salvato in locale:** finestra scorrevole delle ultime `PUBLIC_HISTORY_MAX_ITEMS` (default **5000**) in `backend/public_history.json` — le nuove giocate si aggiungono sempre; superata la soglia, le più vecchie vengono scartate dal file. I **pattern** restano in `backend/public_patterns.json` e si ricaricano al riavvio.
 
 I file `.bat` sono **nel repository** così il flusso desktop è ripetibile anche dopo clone da GitHub.
 

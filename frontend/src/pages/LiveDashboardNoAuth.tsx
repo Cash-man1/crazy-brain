@@ -389,10 +389,11 @@ export default function LiveDashboardNoAuth() {
               <div className="live-panel">
                 <h3 className="live-panel-title">Ultimi esiti</h3>
                 <p className="live-auto-mode-meta">
-                  Auto mode attivo — {pollSec === 1 ? 'aggiornamento ogni secondo' : `aggiornamento ogni ${pollSec} secondi`}. Storico salvato (ultime{' '}
-                  <strong>{data?.public_history_max_items ?? DEFAULT_HISTORY_CAP}</strong> giocate):{' '}
+                  Auto mode attivo — {pollSec === 1 ? 'aggiornamento ogni secondo' : `aggiornamento ogni ${pollSec} secondi`}. Storico su disco: finestra scorrevole delle ultime{' '}
+                  <strong>{data?.public_history_max_items ?? DEFAULT_HISTORY_CAP}</strong> giocate (5001, 5002… si
+                  aggiungono; le più vecchie oltre il limite si eliminano in automatico). Ora salvate:{' '}
                   <strong>{data?.history_saved_rows ?? data?.history_saved_6h_rows ?? '—'}</strong> righe (persistenza
-                  locale; al riavvio si ricaricano fino a quella soglia). Con Playwright la pagina casino viene filtrata
+                  locale; al riavvio si ricarica quel file). Con Playwright la pagina casino viene filtrata
                   sul lasso <strong>{data?.scraper_cronologia_hours_hint ?? 6} h</strong> (variabile{' '}
                   <code>SCRAPER_CRONOLOGIA_HOURS</code> sul backend/worker).
                 </p>

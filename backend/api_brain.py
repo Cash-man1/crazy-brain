@@ -464,7 +464,7 @@ PUBLIC_HISTORY_MAX_ITEMS = max(100, min(int(os.getenv("PUBLIC_HISTORY_MAX_ITEMS"
 def _keep_last_public_history(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not isinstance(items, list):
         return []
-    # Mantieni l'ordine (oldest->newest) e tieni solo le ultime N.
+    # Finestra scorrevole: ordine oldest->newest; ogni salvataggio tiene solo le ultime N (le nuove restano, le vecchie cadono).
     return items[-PUBLIC_HISTORY_MAX_ITEMS:]
 
 
