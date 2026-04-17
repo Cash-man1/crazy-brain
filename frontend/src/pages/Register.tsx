@@ -1,5 +1,5 @@
 export default function Register() {
-  // Registrazione via email rimossa: usiamo solo telefono/OTP nella pagina Login.
-  window.location.replace('/login')
+  // Login/register disattivati: dashboard accessibile direttamente.
+  window.location.replace('/dashboard')
   return null
 }

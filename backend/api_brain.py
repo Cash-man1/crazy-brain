@@ -331,6 +331,8 @@ async def refresh_public_cache_once() -> None:
                 "scraper_rows_count": len(state["rows"]),
                 "history_saved_6h_rows": saved_rows,
                 "history_saved_rows": saved_rows,
+                "public_history_max_items": PUBLIC_HISTORY_MAX_ITEMS,
+                "scraper_cronologia_hours_hint": int(os.getenv("SCRAPER_CRONOLOGIA_HOURS", "6") or 6),
                 "last_poll": _iso_utc_z(state["last_poll"]),
                 "last_screenshot": state.get("last_screenshot"),
                 "new_rows_added": new_rows_added,
@@ -456,10 +458,10 @@ async def stop_public_ingestion_loop() -> None:
 
 PUBLIC_HISTORY_FILE = Path(__file__).resolve().parent / "public_history.json"
 PUBLIC_PATTERNS_FILE = Path(__file__).resolve().parent / "public_patterns.json"
-PUBLIC_HISTORY_MAX_ITEMS = 300
+PUBLIC_HISTORY_MAX_ITEMS = max(100, min(int(os.getenv("PUBLIC_HISTORY_MAX_ITEMS", "5000")), 20000))
 
 
-def _keep_last_300(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _keep_last_public_history(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not isinstance(items, list):
         return []
     # Mantieni l'ordine (oldest->newest) e tieni solo le ultime N.
@@ -475,14 +477,14 @@ def _load_public_history() -> List[Dict[str, Any]]:
         items = data.get("items") if isinstance(data, dict) else []
         if not isinstance(items, list):
             return []
-        return _keep_last_300(items)
+        return _keep_last_public_history(items)
     except Exception:
         return []
 
 
 def _save_public_history(items: List[Dict[str, Any]]) -> None:
     try:
-        items2 = _keep_last_300(items)
+        items2 = _keep_last_public_history(items)
         PUBLIC_HISTORY_FILE.write_text(
             json.dumps({"saved_at": time.time(), "items": items2}, ensure_ascii=False),
             encoding="utf-8",
@@ -1025,6 +1027,8 @@ async def auto_brain_public():
             # Backward compatibility key (old name), and new generic key.
             "history_saved_6h_rows": saved_rows,
             "history_saved_rows": saved_rows,
+            "public_history_max_items": PUBLIC_HISTORY_MAX_ITEMS,
+            "scraper_cronologia_hours_hint": int(os.getenv("SCRAPER_CRONOLOGIA_HOURS", "6") or 6),
             "last_poll": _iso_utc_z(state["last_poll"]),
             "last_screenshot": state.get("last_screenshot"),
             "new_rows_added": new_rows_added,

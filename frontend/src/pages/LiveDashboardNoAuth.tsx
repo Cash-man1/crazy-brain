@@ -1,13 +1,42 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { Brain } from 'lucide-react'
 import LegalFooter from '../components/LegalFooter'
-import { useAuth } from '../context/AuthContext'
 import { INSTAGRAM_URL } from '../config/social'
-import { formatItalyFromBackendIso } from '../lib/formatTime'
+import { formatItalyFromBackendIso, formatItalyShortFromIso } from '../lib/formatTime'
+
+const DEFAULT_HISTORY_CAP = 5000
+
+function displayRowTime(r: any): string {
+  const dt = String(r?.datetime_text || '').trim()
+  // Playwright: stesso testo riga della tabella casino (es. "17 Apr 18:27")
+  if (dt.length > 8 && /\d/.test(dt)) return dt
+  const iso = r?.settled_at_utc
+  if (iso) {
+    const s = formatItalyShortFromIso(iso)
+    if (s) return s
+  }
+  const t = String(r?.time || '').trim()
+  return t || '—'
+}
+
+/** Una sola colonna come "Moltip." sul sito: moltiplicatore finale, non lista Top Slot + finale. */
+function displayFinalMultiplier(r: any): string {
+  const fm = r?.final_multiplier
+  if (fm != null && fm !== '') return `${fm}x`
+  const tops = r?.top_slot_multipliers || []
+  if (Array.isArray(tops) && tops.length === 1) return `${tops[0]}x`
+  if (Array.isArray(tops) && tops.length > 1) {
+    const nums = tops.map((x: any) => Number(x)).filter((n: number) => !Number.isNaN(n))
+    if (nums.length) return `${Math.max(...nums)}x`
+  }
+  return '—'
+}
 
 const API_CANDIDATES = [
   import.meta.env.VITE_API_URL,
+  'http://127.0.0.1:8000',
+  'http://localhost:8000',
 ].filter(Boolean) as string[]
 
 const segmentColor: Record<string, string> = {
@@ -36,8 +65,6 @@ const SEGMENT_LABEL: Record<string, string> = {
 const instagramHref = INSTAGRAM_URL || 'https://www.instagram.com/'
 
 export default function LiveDashboardNoAuth() {
-  const { user, logout } = useAuth()
-  const navigate = useNavigate()
   const [data, setData] = useState<any>(null)
   const [error, setError] = useState('')
   const [apiBase, setApiBase] = useState('')
@@ -145,23 +172,21 @@ export default function LiveDashboardNoAuth() {
           {data && (
             <div className="status-grid" style={{ marginBottom: 18 }}>
               <div className="status-card">
-                {user?.role === 'admin' && (
-                  <button
-                    type="button"
-                    onClick={() => setSourceOpen(true)}
-                    style={{
-                      background: 'transparent',
-                      border: '1px solid rgba(255,255,255,0.25)',
-                      color: 'inherit',
-                      padding: '6px 12px',
-                      borderRadius: 6,
-                      cursor: 'pointer',
-                      fontSize: '1rem',
-                    }}
-                  >
-                    Fonte
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setSourceOpen(true)}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid rgba(255,255,255,0.25)',
+                    color: 'inherit',
+                    padding: '6px 12px',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                  }}
+                >
+                  Fonte
+                </button>
                 <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                   <Link className="btn btn-primary" to="/connect">
                     Collega Telegram / preferenze segnali
@@ -178,23 +203,9 @@ export default function LiveDashboardNoAuth() {
                   >
                     Instagram
                   </a>
-                  {!user && (
-                    <Link className="btn btn-secondary" to="/login">
-                      Login / Registrati
-                    </Link>
-                  )}
-                  {user && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => {
-                        logout()
-                        navigate('/login', { replace: true })
-                      }}
-                    >
-                      Esci
-                    </button>
-                  )}
+                  <div className="description" style={{ marginLeft: 4 }}>
+                    Modalita desktop diretta: login disattivato
+                  </div>
                 </div>
               </div>
             </div>
@@ -269,7 +280,9 @@ export default function LiveDashboardNoAuth() {
               <p className="live-panel-hint" style={{ marginTop: 6 }}>
                 {liveStats.note} In questo riquadro usiamo <strong>{liveStats.buffer_valid_spins}</strong> uscite con esito
                 ruota chiaro. Il cervello ne ha già elaborate <strong>{liveStats.brain_spins_recorded ?? '—'}</strong>; su
-                disco ne sono salvate fino a <strong>{liveStats.persisted_file_rows ?? '—'}</strong>.
+                disco ne sono salvate fino a <strong>{liveStats.persisted_file_rows ?? '—'}</strong> (cronologia). I{' '}
+                <strong>pattern</strong> utili restano in <code>public_patterns.json</code> e si ricaricano al riavvio; i
+                pattern non più significativi vengono scartati automaticamente dal motore.
               </p>
               <div className="live-stats-kpis">
                 <span title="Percentuale di giri in cui la Top Slot ha indicato la stessa casella che è uscita sulla ruota">
@@ -382,8 +395,12 @@ export default function LiveDashboardNoAuth() {
               <div className="live-panel">
                 <h3 className="live-panel-title">Ultimi esiti</h3>
                 <p className="live-auto-mode-meta">
-                  Auto mode attivo — {pollSec === 1 ? 'aggiornamento ogni secondo' : `aggiornamento ogni ${pollSec} secondi`}. Storico salvato (ultime 300 giocate):{' '}
-                  <strong>{data?.history_saved_rows ?? data?.history_saved_6h_rows ?? '—'}</strong> righe (persistenza locale; al riavvio si ricaricano le ultime 300).
+                  Auto mode attivo — {pollSec === 1 ? 'aggiornamento ogni secondo' : `aggiornamento ogni ${pollSec} secondi`}. Storico salvato (ultime{' '}
+                  <strong>{data?.public_history_max_items ?? DEFAULT_HISTORY_CAP}</strong> giocate):{' '}
+                  <strong>{data?.history_saved_rows ?? data?.history_saved_6h_rows ?? '—'}</strong> righe (persistenza
+                  locale; al riavvio si ricaricano fino a quella soglia). Con Playwright la pagina casino viene filtrata
+                  sul lasso <strong>{data?.scraper_cronologia_hours_hint ?? 6} h</strong> (variabile{' '}
+                  <code>SCRAPER_CRONOLOGIA_HOURS</code> sul backend/worker).
                 </p>
                 <p className="live-panel-hint">
                   {latestRowsAll.length === 0
@@ -410,7 +427,9 @@ export default function LiveDashboardNoAuth() {
                         const wheelSeg = wheelSegForRow(r)
                         return (
                           <tr key={`${r.time}-${r.segment}-${idx}`}>
-                            <td>{r.time}</td>
+                            <td title={r.settled_at_utc ? formatItalyFromBackendIso(r.settled_at_utc) : undefined}>
+                              {displayRowTime(r)}
+                            </td>
                             <td>
                               {r.slot_icon ? (
                                 <span
@@ -431,9 +450,7 @@ export default function LiveDashboardNoAuth() {
                                 '-'
                               )}
                             </td>
-                            <td>
-                              {(r.top_slot_multipliers || []).length ? r.top_slot_multipliers.join(' / ') + 'x' : '-'}
-                            </td>
+                            <td>{displayFinalMultiplier(r)}</td>
                           </tr>
                         )
                       })}

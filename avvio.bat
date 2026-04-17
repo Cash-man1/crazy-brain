@@ -21,11 +21,15 @@ set CORS_EXTRA_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 set PUBLIC_INGESTION_ENABLED=1
 set LIVE_ROWS_FROM_REDIS=0
 set REDIS_URL=
+set "DASHBOARD_URL=http://localhost:5173/dashboard"
+set "SOURCE_READ_URL=https://www.casino.org/casinoscores/it/crazy-time/"
 
 :: 1 = API JSON Evolution (stessi ultimi esiti/orari, leggero). 0 = solo Playwright sulla pagina HTML casino.org
 set SCRAPER_USE_EVOLUTION_API=1
 :: Se Evolution fallisce, usa Playwright ^(richiede chromium da setup.bat^)
 set SCRAPER_PLAYWRIGHT_FALLBACK=1
+:: Ore di cronologia da selezionare sulla pagina casino (1,6,12,24,48,72) quando usi Playwright
+set SCRAPER_CRONOLOGIA_HOURS=24
 
 if not exist "frontend\.env" (
   > "frontend\.env" echo VITE_API_URL=http://127.0.0.1:8000
@@ -39,9 +43,15 @@ timeout /t 4 /nobreak >nul
 echo Avvio frontend Vite...
 start "Crazy Brain Web" cmd /k cd /d "%ROOT%frontend" ^& npm run dev
 
+timeout /t 5 /nobreak >nul
+echo Apro automaticamente dashboard e pagina sorgente...
+start "" "%DASHBOARD_URL%"
+start "" "%SOURCE_READ_URL%"
+
 echo.
 echo Backend:  http://127.0.0.1:8000   (health: /health)
-echo Frontend: apri la URL mostrata da Vite ^(di solito http://localhost:5173^)
+echo Frontend: %DASHBOARD_URL%
+echo Sorgente lettura: %SOURCE_READ_URL%
 echo Dashboard pubblica: /brain/... come da menu dell'app
 echo.
 echo Per forzare SOLO lettura pagina HTML ^(Playwright^): in questo file imposta SCRAPER_USE_EVOLUTION_API=0

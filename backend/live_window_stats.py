@@ -9,6 +9,12 @@ from typing import Any, Dict, List, Sequence
 
 
 def _max_mult_in_row(row: Dict[str, Any]) -> int:
+    fm = row.get("final_multiplier")
+    if fm is not None:
+        try:
+            return int(fm)
+        except (TypeError, ValueError):
+            pass
     top = row.get("top_slot_multipliers") or []
     if isinstance(top, list) and top:
         try:
@@ -54,7 +60,7 @@ def compute_live_window_stats(
         return out
 
     sizes: List[int] = []
-    for cap in (50, 150, 300):
+    for cap in (50, 100, 150, 300, 500, 1000, 2000, 5000):
         if n_all >= cap:
             sizes.append(cap)
     if not sizes or sizes[-1] != n_all:

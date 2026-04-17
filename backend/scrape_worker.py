@@ -145,20 +145,31 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         # Important: the time-range controls sometimes mount only after scrolling to the table area.
         _ensure_cronologia_in_view()
         try:
+            raw_h = (os.getenv("SCRAPER_CRONOLOGIA_HOURS") or "6").strip()
+            try:
+                hours_sel = int(raw_h)
+            except ValueError:
+                hours_sel = 6
+            if hours_sel not in (1, 6, 12, 24, 48, 72):
+                hours_sel = 6
             # Try clicking the dropdown "Seleziona Lasso Di Tempo" if present.
             sel = page.get_by_text(re.compile(r"Seleziona\s+Lasso\s+Di\s+Tempo", re.IGNORECASE))
             if sel.count() > 0:
                 sel.first.click(timeout=2500)
                 page.wait_for_timeout(250)
-            six_hours_btn = page.get_by_role("button", name=re.compile(r"Ultime\s*6\s*ore", re.IGNORECASE))
-            if six_hours_btn.count() == 0:
-                six_hours_btn = page.get_by_text(re.compile(r"Ultime\s*6\s*ore", re.IGNORECASE))
-            if six_hours_btn.count() > 0:
+            if hours_sel == 1:
+                label_re = re.compile(r"Ultime\s*1\s*ora", re.IGNORECASE)
+            else:
+                label_re = re.compile(rf"Ultime\s*{hours_sel}\s*ore", re.IGNORECASE)
+            range_btn = page.get_by_role("button", name=label_re)
+            if range_btn.count() == 0:
+                range_btn = page.get_by_text(label_re)
+            if range_btn.count() > 0:
                 try:
-                    six_hours_btn.first.scroll_into_view_if_needed(timeout=2500)
+                    range_btn.first.scroll_into_view_if_needed(timeout=2500)
                 except Exception:
                     pass
-                six_hours_btn.first.click(timeout=3000, force=True)
+                range_btn.first.click(timeout=3000, force=True)
                 page.wait_for_timeout(900)
         except Exception:
             pass
