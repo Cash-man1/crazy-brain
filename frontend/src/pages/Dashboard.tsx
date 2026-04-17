@@ -3,6 +3,7 @@ import { Brain, Crown, LogOut, Shield, Zap } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import LegalFooter from '../components/LegalFooter'
+import InstagramMarkLink from '../components/InstagramMarkLink'
 import { INSTAGRAM_URL } from '../config/social'
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://crazy-brain-api.onrender.com'
@@ -193,15 +194,15 @@ export default function Dashboard() {
               </button>
             </p>
             <p style={{ marginTop: 10 }}>
-              <a
-                className="btn btn-secondary"
+              <InstagramMarkLink
                 href={instagramHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ display: 'inline-block', textDecoration: 'none', textAlign: 'center' }}
-              >
-                Instagram
-              </a>
+                title={
+                  INSTAGRAM_URL
+                    ? 'Profilo Instagram'
+                    : 'Instagram — imposta VITE_INSTAGRAM_URL su Render per il tuo profilo'
+                }
+                className="btn btn-secondary"
+              />
             </p>
           </div>
 

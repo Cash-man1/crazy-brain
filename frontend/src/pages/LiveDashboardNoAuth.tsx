@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Brain } from 'lucide-react'
 import LegalFooter from '../components/LegalFooter'
+import InstagramMarkLink from '../components/InstagramMarkLink'
 import { INSTAGRAM_URL } from '../config/social'
 import { formatItalyFromBackendIso, formatItalyTableRowTime } from '../lib/formatTime'
 
@@ -172,18 +173,15 @@ export default function LiveDashboardNoAuth() {
                   <Link className="btn btn-primary" to="/connect">
                     Collega Telegram / preferenze segnali
                   </Link>
-                  <Link className="btn" to="/chat">
-                    Chat live
-                  </Link>
-                  <a
-                    className="btn btn-secondary"
+                  <InstagramMarkLink
                     href={instagramHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={INSTAGRAM_URL ? 'Profilo Instagram' : 'Instagram — imposta VITE_INSTAGRAM_URL su Render per il tuo profilo'}
-                  >
-                    Instagram
-                  </a>
+                    title={
+                      INSTAGRAM_URL
+                        ? 'Profilo Instagram'
+                        : 'Instagram — imposta VITE_INSTAGRAM_URL su Render per il tuo profilo'
+                    }
+                    className="btn btn-secondary"
+                  />
                   <div className="description" style={{ marginLeft: 4 }}>
                     Modalita desktop diretta: login disattivato
                   </div>

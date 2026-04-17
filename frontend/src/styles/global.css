@@ -1161,3 +1161,38 @@ h1, h2, h3 {
     padding: 24px;
   }
 }
+
+/* Link Instagram: logo gradient + pill (InstagramMarkLink.tsx) */
+a.instagram-mark-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  border-radius: 10px;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid rgba(225, 48, 108, 0.4);
+  background: linear-gradient(
+    135deg,
+    rgba(253, 244, 151, 0.14),
+    rgba(253, 89, 73, 0.12),
+    rgba(214, 36, 159, 0.14),
+    rgba(40, 90, 235, 0.1)
+  );
+  color: var(--text-primary, #f3f4f6);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+a.instagram-mark-link:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 22px rgba(214, 36, 159, 0.22);
+  border-color: rgba(245, 96, 154, 0.65);
+}
+a.instagram-mark-link .instagram-mark-link__icon {
+  flex-shrink: 0;
+  display: block;
+}
+a.instagram-mark-link.btn {
+  vertical-align: middle;
+}
