@@ -81,8 +81,11 @@ Come da `.env.example` se usi pagamenti e reset mail.
 
 | Variabile | Note |
 |-----------|------|
+| `NOTIFY_SIGNALS_ENABLED` | `true` per inviare segnali caldi |
+| `NOTIFY_MIN_CONFIDENCE` | Soglia 0–1 (default in `config.py`) |
 | `TELEGRAM_BOT_TOKEN` | Da BotFather |
 | `TELEGRAM_BOT_USERNAME` | Senza `@` |
+| `TELEGRAM_CHAT_IDS` | Opzionale: CSV di **chat id** (notifiche anche senza utente collegato in DB) |
 | `TELEGRAM_WEBHOOK_SECRET_TOKEN` | Opzionale ma consigliato: **stesso** valore in `setWebhook?secret_token=` |
 | `TELEGRAM_WEBHOOK_STRICT_SECRET` | `true` solo dopo aver allineato webhook e env |
 

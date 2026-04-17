@@ -69,6 +69,7 @@ git push origin main
 - `NOTIFY_SIGNALS_ENABLED` = `true`
 - `TELEGRAM_BOT_TOKEN` = token del bot
 - `TELEGRAM_BOT_USERNAME` = username bot (senza `@`)
+- `TELEGRAM_CHAT_IDS` = (opzionale) uno o più **chat id** separati da virgola: ricevi i segnali **senza** account DB (utile per dashboard pubblica locale)
 - `TELEGRAM_WEBHOOK_SECRET_TOKEN` = (opzionale) stesso valore che passi a `setWebhook` come `secret_token`
 - `TELEGRAM_WEBHOOK_STRICT_SECRET` = `true` solo se vuoi **rifiutare** richieste senza header secret (vedi sotto)
 

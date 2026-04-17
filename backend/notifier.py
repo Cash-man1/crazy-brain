@@ -6,7 +6,7 @@ Best-effort, deduped in-memory.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 import time
 import logging
 
@@ -33,6 +33,15 @@ def _parse_segments_csv(raw: str) -> Set[str]:
         p = part.strip().upper()
         if p:
             out.add(p)
+    return out
+
+
+def _parse_telegram_chat_ids_csv(raw: str) -> List[str]:
+    out: List[str] = []
+    for part in (raw or "").split(","):
+        p = part.strip()
+        if p:
+            out.append(p)
     return out
 
 
@@ -75,14 +84,29 @@ async def notify_hot_signals(hot_signals: List[Dict[str, Any]], source: str = "p
             )
         )).mappings().all()
 
-    if not users:
-        return
-
+    # (chat_id, allowed_segments empty set = tutti i segmenti, dedup_label)
+    targets: List[Tuple[str, Set[str], str]] = []
+    seen_chat: Set[str] = set()
     for u in users:
         chat_id = str(u.get("telegram_chat_id") or "")
-        if not chat_id:
+        if not chat_id or chat_id in seen_chat:
             continue
+        seen_chat.add(chat_id)
         allowed = _parse_segments_csv(u.get("notify_segments") or "")
+        targets.append((chat_id, allowed, f"u{u.get('id')}"))
+
+    for cid in _parse_telegram_chat_ids_csv(settings.TELEGRAM_CHAT_IDS):
+        if cid in seen_chat:
+            continue
+        seen_chat.add(cid)
+        targets.append((cid, set(), f"env:{cid}"))
+
+    if not targets:
+        return
+
+    min_conf = float(settings.NOTIFY_MIN_CONFIDENCE or 0.0)
+
+    for chat_id, allowed, who in targets:
         picked: Optional[Dict[str, Any]] = None
         for s in hot_signals:
             seg = str(s.get("segment") or "").upper()
@@ -97,12 +121,12 @@ async def notify_hot_signals(hot_signals: List[Dict[str, Any]], source: str = "p
             conf = float(picked.get("confidence") or 0.0)
         except Exception:
             conf = 0.0
-        if conf < float(settings.NOTIFY_MIN_CONFIDENCE or 0.0):
+        if conf < min_conf:
             continue
 
         seg = str(picked.get("segment") or "")
         phase = str(picked.get("phase") or "")
-        dedup_key = f"{source}:u{u.get('id')}:{seg}:{phase}:{round(conf,3)}"
+        dedup_key = f"{source}:{who}:{seg}:{phase}:{round(conf, 3)}"
         if dedup_key in _sent:
             continue
         _sent[dedup_key] = now
@@ -111,5 +135,5 @@ async def notify_hot_signals(hot_signals: List[Dict[str, Any]], source: str = "p
         try:
             await send_telegram_message(settings.TELEGRAM_BOT_TOKEN, chat_id, text)
         except Exception:
-            logger.exception("Failed to notify telegram user_id=%s", u.get("id"))
+            logger.exception("Failed to notify telegram chat_id=%s who=%s", chat_id, who)
 

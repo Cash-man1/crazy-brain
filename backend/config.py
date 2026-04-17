@@ -70,9 +70,9 @@ class Settings(BaseSettings):
     TRIAL_DAYS: int = 2
     MAX_TRIAL_USERS: int = 10
     
-    # Admin/VIP credentials (hashed in production)
+    # Admin/VIP seed (solo se valorizzati in .env — niente password di default nel repo)
     ADMIN_EMAIL: str = "admin@crazy-brain.local"
-    ADMIN_PASSWORD: str = "ChangeMeNow1!"
+    ADMIN_PASSWORD: str = ""
     # Opzionale: crea/aggiorna admin con login POST /api/auth/phone/login (numero + password).
     # Imposta su Render (non committare la password nel repo).
     ADMIN_PHONE_NUMBER: str = ""
@@ -109,11 +109,6 @@ class SubscriptionStatus:
     CANCELLED = "cancelled"
     NONE = "none"
 
-# VIP users predefiniti
-VIP_USERS = {
-    "vip1@gmail.com": "vip1-1234",
-    "vip2@gmail.com": "vip2-1234",
-    "vip3@gmail.com": "vip3-1234",
-    "vip4@gmail.com": "vip4-1234",
-    "vip5@gmail.com": "vip5-1234",
-}
+# VIP seed opzionale: solo email presenti in questo dict, con password in chiaro SOLO in .env
+# (es. export/import da variabile d'ambiente JSON in futuro). Repo pubblico: dict vuoto.
+VIP_USERS: dict[str, str] = {}

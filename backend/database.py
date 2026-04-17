@@ -6,7 +6,7 @@ from typing import Optional
 import uuid
 import re
 
-from config import get_settings
+from config import get_settings, PASSWORD_MIN_LENGTH
 from security import get_password_hash
 
 settings = get_settings()
@@ -245,27 +245,33 @@ async def ensure_default_accounts(
     """Create admin/VIP lifetime accounts if they do not exist."""
     admin = await get_user_by_email(db, admin_email)
     if not admin:
-        db.add(
-            User(
-                email=admin_email.lower(),
-                hashed_password=get_password_hash(admin_password),
-                role="admin",
-                is_active=True,
-                is_verified=True,
-                subscription_status="active",
-                is_trial_used=False,
+        apw = (admin_password or "").strip()
+        if len(apw) >= PASSWORD_MIN_LENGTH:
+            db.add(
+                User(
+                    email=admin_email.lower(),
+                    hashed_password=get_password_hash(apw),
+                    role="admin",
+                    is_active=True,
+                    is_verified=True,
+                    subscription_status="active",
+                    is_trial_used=False,
+                )
             )
-        )
 
-    for email, password in vip_users.items():
-        vip = await get_user_by_email(db, email.lower())
+    for email, password in (vip_users or {}).items():
+        em = (email or "").strip().lower()
+        vpw = (password or "").strip()
+        if not em or len(vpw) < PASSWORD_MIN_LENGTH:
+            continue
+        vip = await get_user_by_email(db, em)
         if vip:
             continue
 
         db.add(
             User(
-                email=email.lower(),
-                hashed_password=get_password_hash(password),
+                email=em,
+                hashed_password=get_password_hash(vpw),
                 role="vip",
                 is_active=True,
                 is_verified=True,
