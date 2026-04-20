@@ -57,55 +57,6 @@ Si aprono di solito **due finestre**:
 `avvio.bat` imposta anche variabili utili (es. **72 ore** di cronologia casino per Playwright, storico fino a **5000** giocate in locale). Per modificarle, apri `avvio.bat` con un editor di testo.
 
 ---
-
-## 2) Telegram: segnali senza login nell’app
-
-L’interfaccia **non** usa più form di login/registrazione per i segnali: configuri il **bot** e i **chat id** nel `backend/.env`. Nella dashboard apri **`/connect`** per la guida testuale.
-
-| Cosa | Note |
-|------|------|
-| **Segnali caldi** | `NOTIFY_SIGNALS_ENABLED=true` + token bot + `TELEGRAM_CHAT_IDS` (vedi sotto) |
-| **Solo alcuni segmenti** (broadcast `.env`) | Opzionale: `NOTIFY_BROADCAST_SEGMENTS=1,2,CH` |
-| **Webhook HTTPS** | Solo se usi ancora flussi OTP/utenti DB; **non** serve solo per `TELEGRAM_CHAT_IDS` |
-
-### Passo A — Crea il bot (una volta)
-
-1. Apri Telegram e cerca **`@BotFather`**  
-2. Invia `/newbot` e segui le istruzioni (nome e username del bot)  
-3. BotFather ti dà il **token** (lungo, segreto: non condividerlo, non metterlo su GitHub)  
-4. Annota anche lo **username** del bot (es. `MioCrazyBrainBot`, **senza** `@`)
-
-### Passo B — Metti il bot nel file di configurazione del backend
-
-1. Nella cartella `backend`, copia il modello se non hai ancora un file tuo:  
-   - copia `backend\.env.example` → rinomina in **`backend\.env`** (se non esiste già)  
-2. Apri **`backend\.env`** con Blocco note o VS Code e imposta almeno:
-
-```env
-TELEGRAM_BOT_TOKEN=il_token_che_ti_ha_dato_botfather
-TELEGRAM_BOT_USERNAME=nome_utente_bot_senza_chiocciola
-NOTIFY_SIGNALS_ENABLED=true
-NOTIFY_MIN_CONFIDENCE=0.45
-TELEGRAM_CHAT_IDS=IL_TUO_CHAT_ID
-# Opzionale: solo questi segmenti verso TELEGRAM_CHAT_IDS
-# NOTIFY_BROADCAST_SEGMENTS=1,2,CH
-```
-
-Salva il file. **Riavvia** il backend (`avvio.bat` o il terminale dove gira `uvicorn`) dopo ogni modifica a `.env`.
-
-**Chat id:** chiedilo a bot come `@userinfobot` o `@getidsbot` su Telegram. In `frontend/.env`, `VITE_TELEGRAM_BOT_USERNAME` (senza `@`) mostra il pulsante “Apri bot” in `/connect`.
-
-### Passo C — Webhook (solo se usi OTP / utenti in database)
-
-Se ti serve collegare la chat a un utente nel DB con `/start`, serve HTTPS e `setWebhook` verso  
-`https://<TUO_BACKEND>/api/notify/telegram/webhook` — vedi **[docs/RENDER_DEPLOY.md](docs/RENDER_DEPLOY.md)**.
-
-### Passo D — (Opzionale) API login telefono
-
-Le route backend per OTP/login restano; in questa versione **non** c’è pagina login nel frontend (solo dashboard + `/connect` guida).
-
----
-
 ## 3) Usare l’app nel browser
 
 - **Dashboard pubblica (senza login)** — tipicamente:  
@@ -117,42 +68,6 @@ Le route backend per OTP/login restano; in questa versione **non** c’è pagina
 Se il frontend non parla col backend, controlla **`frontend\.env`**: deve esserci qualcosa come `VITE_API_URL=http://127.0.0.1:8000`.
 
 ---
-
-## 4) Pubblicare su GitHub e Render
-
-### GitHub
-
-```powershell
-git status
-git add .
-git commit -m "descrizione delle modifiche"
-git push origin main
-```
-
-**Non committare mai** `backend\.env` con token veri (è in `.gitignore`). Usa solo `.env.example` come modello.
-
-### Render (hosting)
-
-- Blueprint: **`render.yaml`** nel repo  
-- Guida dettagliata: **[docs/RENDER_DEPLOY.md](docs/RENDER_DEPLOY.md)** (servizi, Redis, worker, variabili, checklist)
-
-Variabili Telegram lato backend (Render), in sintesi:
-
-- `NOTIFY_SIGNALS_ENABLED=true`  
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`  
-- `TELEGRAM_CHAT_IDS` (opzionale, CSV di chat id)  
-- `TELEGRAM_WEBHOOK_SECRET_TOKEN` + `setWebhook` allineato (consigliato in produzione)
-
-Frontend su Render:
-
-- `VITE_API_URL` = URL pubblico del backend (es. `https://tuo-api.onrender.com`)
-
-### Render free e “sempre acceso”
-
-Su piano gratuito il servizio può andare in **sleep**. Soluzioni: piano a pagamento, oppure servizi esterni che chiamano periodicamente `GET <BACKEND_URL>/health`.
-
----
-
 ## 5) Note su dati e sicurezza
 
 - **Cronologia / pattern in locale** (desktop): file tipo `backend/public_history.json` e `backend/public_patterns.json` (vedi `.gitignore`: di solito non vanno su GitHub).  
@@ -160,21 +75,8 @@ Su piano gratuito il servizio può andare in **sleep**. Soluzioni: piano a pagam
 - **Admin / VIP di seed**: il repository **non** contiene password preimpostate per account demo; se vuoi un admin iniziale, imposta `ADMIN_EMAIL` e `ADMIN_PASSWORD` nel `.env` (password che rispetti la lunghezza minima del progetto).
 
 ---
-
-## Dove approfondire
-
-| Argomento | File |
-|-----------|------|
-| Deploy Render, Redis, worker | [docs/RENDER_DEPLOY.md](docs/RENDER_DEPLOY.md) |
-| Variabili ambiente modello | `backend/.env.example` |
-| URL API Telegram (setWebhook) | [documentazione ufficiale](https://core.telegram.org/bots/api#setwebhook) |
-
----
-
 ## Sviluppo desktop: sorgente dati (richiamo)
 
 - Con **`SCRAPER_USE_EVOLUTION_API=1`** (default in `avvio.bat`) si usano gli ultimi round da API JSON (leggero).  
 - Con **`SCRAPER_PLAYWRIGHT_FALLBACK=1`**, se l’API non risponde, si usa Playwright sulla pagina `casino.org` (serve Chromium da `setup.bat`).  
 - **Solo HTML**: in `avvio.bat` imposta `SCRAPER_USE_EVOLUTION_API=0`.
-
-In produzione su Render la logica privilegia di solito API + Redis/worker; in locale `avvio.bat` ti dà un flusso simile con fallback browser se serve.
