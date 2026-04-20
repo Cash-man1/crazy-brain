@@ -9,11 +9,7 @@ Può inviare **notifiche segnali** su **Telegram** tramite bot (config in `backe
 ## Indice (parti da qui se non sai da dove iniziare)
 
 1. [Prima volta sul PC (Windows)](#1-prima-volta-sul-pc-windows) — far partire l’app in locale  
-2. [Telegram: segnali senza login nell’app](#2-telegram-segnali-senza-login-nellapp) — bot, `.env`, notifiche  
 3. [Usare l’app nel browser](#3-usare-lapp-nel-browser) — dashboard e `/connect`  
-4. [Pubblicare su GitHub e Render](#4-pubblicare-su-github-e-render)  
-5. [Note su dati e sicurezza](#5-note-su-dati-e-sicurezza)
-
 ---
 
 ## 1) Prima volta sul PC (Windows)
