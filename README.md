@@ -1,95 +1,103 @@
-# Crazy Brain
+🧠 Crazy Brain
+Guida semplice (Windows + macOS)
+🪟 WINDOWS
+🧩 1. Installa i programmi
 
-Guida veloce plug-and-play per utenti **Windows** e **macOS**.
+Scarica e installa:
 
----
+Git → https://git-scm.com/download/win
+Node.js (LTS) → https://nodejs.org/en/download
+Python 3.10+ → https://www.python.org/downloads/windows/
 
-## 1) Scarica il progetto (Windows e Mac)
+⚠️ Durante installazione Python → ✔️ Add to PATH
 
-Apri terminale e incolla:
+💻 2. Apri il terminale
 
-```bash
+👉 Cerca nel menu Start:
+
+cmd
+oppure PowerShell
+oppure Terminale Windows
+📥 3. Scarica il progetto
+
+Nel terminale incolla:
+
 git clone https://github.com/Cash-man1/crazy-brain.git
 cd crazy-brain
-```
+📁 4. Apri la cartella
 
----
+👉 Vai nella cartella crazy-brain appena scaricata
 
-## 2) Windows (plug-and-play)
+⚙️ 5. Setup (prima volta)
 
-### Cosa installare
+👉 Fai doppio clic su:
 
-- Git: [https://git-scm.com/download/win](https://git-scm.com/download/win)
-- Node.js LTS: [https://nodejs.org/en/download](https://nodejs.org/en/download)
-- Python 3.10+: [https://www.python.org/downloads/windows/](https://www.python.org/downloads/windows/)
+setup.bat
 
-Quando installi Python su Windows, spunta **Add Python to PATH**.
+⏳ Aspetta qualche minuto
 
-### Primo setup (una volta)
+▶️ 6. Avvio
 
-Fai doppio clic su:
+👉 Fai doppio clic su:
 
-`setup.bat`
+avvio.bat
 
-### Avvio (ogni volta)
+👉 Poi apri nel browser:
 
-Fai doppio clic su:
+http://localhost:5173/dashboard
+⛔ 7. Chiusura
 
-`avvio.bat`
+👉 Fai doppio clic su:
 
-Poi apri:
+chiudi.bat
+🍎 macOS
+💻 1. Apri il Terminale
 
-`http://localhost:5173/dashboard`
+👉 Premi:
 
-### Chiusura
+CMD + SPACE
 
-Fai doppio clic su:
+Scrivi:
 
-`chiudi.bat`
-
----
-
-## 3) macOS (plug-and-play)
-
-### Cosa installare
-
-- Git: [https://git-scm.com/download/mac](https://git-scm.com/download/mac)
-- Node.js LTS: [https://nodejs.org/en/download](https://nodejs.org/en/download)
-- Python 3.10+: [https://www.python.org/downloads/macos/](https://www.python.org/downloads/macos/)
-
-Alternativa (consigliata) con Homebrew:
-
-```bash
-brew install git node python
-```
-
-### Primo setup (una volta)
-
-```bash
+Terminal
+📥 2. Scarica il progetto
+git clone https://github.com/Cash-man1/crazy-brain.git
+cd crazy-brain
+⚙️ 3. Setup (prima volta)
 chmod +x setup-mac.sh avvio-mac.sh chiudi-mac.sh
 ./setup-mac.sh
-```
-
-### Avvio (ogni volta)
-
-```bash
+▶️ 4. Avvio
 ./avvio-mac.sh
-```
 
-Poi apri:
+👉 Apri nel browser:
 
-`http://localhost:5173/dashboard`
-
-### Chiusura
-
-```bash
+http://localhost:5173/dashboard
+⛔ 5. Chiusura
 ./chiudi-mac.sh
-```
+🧯 SE QUALCOSA NON FUNZIONA
+❌ Pagina non si apre
 
----
+👉 Controlla:
 
-## 4) Se non parte (rapido)
+http://127.0.0.1:8000/health
+❌ Non parte nulla
 
-- Windows: rifai `setup.bat`, poi `avvio.bat`
-- Mac: rifai `./setup-mac.sh`, poi `./avvio-mac.sh`
-- controlla backend: `http://127.0.0.1:8000/health`
+👉 Rifai setup:
+
+Windows:
+
+setup.bat
+
+Mac:
+
+./setup-mac.sh
+❌ Errori strani
+
+👉 Soluzione universale:
+
+Chiudi tutto
+Rifai setup
+Riavvia
+🚀 FATTO
+
+Se vedi la dashboard → funziona 🎉
