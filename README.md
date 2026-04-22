@@ -1,69 +1,115 @@
 # Crazy Brain
 
-Applicazione web locale per analisi e segnali su Crazy Time.
-Stack: frontend in `frontend/`, backend API in `backend/`.
+Guida super semplice per usare Crazy Brain su Windows.
+
+Questa guida dice solo:
+
+- cosa installare
+- come installarlo
+- come avviare il programma
+
+Niente parti tecniche da sviluppatore.
 
 ---
 
-## Avvio rapido (Windows)
+## 1) Cosa devi installare (Windows)
 
-### Cosa ti serve installato
+Installa queste 3 cose, in questo ordine:
 
-- **Windows 10/11**
-- **Git** (per scaricare il progetto): [https://git-scm.com](https://git-scm.com)  
-- **Node.js** (LTS): [https://nodejs.org](https://nodejs.org) — serve per il frontend  
-- **Python 3.10+**: [https://www.python.org](https://www.python.org) — durante `setup.bat` conviene avere “Add Python to PATH” spuntato
+1. **Git**: [https://git-scm.com/download/win](https://git-scm.com/download/win)
+2. **Node.js LTS**: [https://nodejs.org/en/download](https://nodejs.org/en/download)
+3. **Python 3.10+**: [https://www.python.org/downloads/windows/](https://www.python.org/downloads/windows/)
 
-### Scarica il progetto
+Quando installi Python:
 
-Apri **PowerShell** o **Prompt dei comandi**, vai nella cartella dove tieni i progetti, poi:
+- metti la spunta su **Add Python to PATH**
+- poi fai **Install Now**
+
+Quando installi Git e Node.js:
+
+- lascia le opzioni di default
+- clicca sempre **Next** fino a **Finish**
+
+---
+
+## 2) Scarica il progetto
+
+Apri PowerShell e incolla:
 
 ```powershell
 git clone https://github.com/Cash-man1/crazy-brain.git
 cd crazy-brain
 ```
 
-(Se il tuo fork ha un altro URL, usa quello.)
+---
 
-### Una sola volta: `setup.bat`
+## 3) Primo setup (una sola volta)
 
-Nella cartella del progetto (`crazy-brain` o come l’hai rinominata):
+Apri la cartella del progetto e fai doppio clic su:
 
-1. Doppio clic su **`setup.bat`**  
-   oppure da terminale, nella cartella del repo: `.\setup.bat`
+`setup.bat`
 
-Cosa fa in sintesi: crea l’ambiente Python **`.venv`**, installa le dipendenze backend, opzionalmente **Playwright Chromium**, esegue **`npm ci`** nel frontend, e crea file **`.env`** di esempio se mancano (`backend\.env`, `frontend\.env`).
-
-### Ogni volta che vuoi lavorare: `avvio.bat`
-
-Doppio clic su **`avvio.bat`**.
-
-Si aprono di solito **due finestre**:
-
-- **Backend** → API su `http://127.0.0.1:8000` (controlla che risponda: apri `http://127.0.0.1:8000/health` nel browser)  
-- **Frontend** → sito Vite su `http://localhost:5173`
-
-`avvio.bat` imposta anche variabili utili (es. **72 ore** di cronologia casino per Playwright, storico fino a **5000** giocate in locale). Per modificarle, apri `avvio.bat` con un editor di testo.
+Aspetta la fine completa. Non chiudere le finestre durante il setup.
 
 ---
-## Uso nel browser
 
-- **Dashboard** — tipicamente:  
-  `http://localhost:5173/dashboard`  
-  Mostra ultimi esiti, mini cervelli e statistiche live.
+## 4) Avvio dell'app (ogni volta)
 
-Se il frontend non parla col backend, controlla **`frontend\.env`**: deve esserci qualcosa come `VITE_API_URL=http://127.0.0.1:8000`.
+Fai doppio clic su:
+
+`avvio.bat`
+
+Si aprono due finestre:
+
+- backend su `http://127.0.0.1:8000`
+- frontend su `http://localhost:5173`
+
+Quando parte, apri questo link nel browser:
+
+`http://localhost:5173/dashboard`
 
 ---
-## Note dati e sicurezza
 
-- **Cronologia / pattern in locale** (desktop): file tipo `backend/public_history.json` e `backend/public_patterns.json` (vedi `.gitignore`: di solito non vanno su GitHub).  
-- **In produzione** imposta sempre `SECRET_KEY` lungo e unico nel `.env` / pannello Render — non usare mai il placeholder di esempio in produzione.  
-- **Admin / VIP di seed**: il repository **non** contiene password preimpostate per account demo; se vuoi un admin iniziale, imposta `ADMIN_EMAIL` e `ADMIN_PASSWORD` nel `.env` (password che rispetti la lunghezza minima del progetto).
+## 5) Stop dell'app
+
+Per chiudere tutto in modo pulito:
+
+- fai doppio clic su `chiudi.bat`
 
 ---
-## Sviluppo desktop: sorgente dati (richiamo)
 
-- Con **`SCRAPER_USE_EVOLUTION_API=1`** (default in `avvio.bat`) si usano gli ultimi round da API JSON (leggero).  
-- Con **`SCRAPER_PLAYWRIGHT_FALLBACK=1`**, se l’API non risponde, si usa Playwright sulla pagina `casino.org` (serve Chromium da `setup.bat`).  
-- **Solo HTML**: in `avvio.bat` imposta `SCRAPER_USE_EVOLUTION_API=0`.
+## 6) Guida visuale rapida (screen da seguire)
+
+- **Schermata 1:** cartella progetto aperta
+- **Schermata 2:** doppio clic su `setup.bat` (solo la prima volta)
+- **Schermata 3:** doppio clic su `avvio.bat`
+- **Schermata 4:** browser su `http://localhost:5173/dashboard`
+
+---
+
+## 7) Se non va (soluzione veloce)
+
+### Caso A - Non parte nulla
+
+- riavvia il PC
+- riesegui `setup.bat`
+- poi riesegui `avvio.bat`
+
+### Caso B - Errore Python
+
+- reinstalla Python da [python.org](https://www.python.org/downloads/windows/)
+- spunta **Add Python to PATH**
+- rifai `setup.bat`
+
+### Caso C - Errore Node / npm
+
+- reinstalla Node.js LTS da [nodejs.org](https://nodejs.org/en/download)
+- rifai `setup.bat`
+
+### Caso D - Si apre ma non carica
+
+- chiudi con `chiudi.bat`
+- riapri con `avvio.bat`
+- aspetta 20-30 secondi e ricarica la pagina
+
+Se ancora non va, rifai da capo i passi 1 -> 4.
