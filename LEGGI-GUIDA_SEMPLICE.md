@@ -50,6 +50,8 @@ http://localhost:5173/dashboard
 👉 Fai doppio clic su:
 
 chiudi.bat
+
+
 🍎 macOS
 💻 1. Apri il Terminale
 
