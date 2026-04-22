@@ -1,18 +1,11 @@
 # Crazy Brain
 
-Applicazione web per **analisi e segnali** su Crazy Time (casino live): **frontend** in `frontend/`, **backend** API in `backend/`.
-
-Può inviare **notifiche segnali** su **Telegram** tramite bot (config in `backend/.env`, senza login nell’app).
+Applicazione web locale per analisi e segnali su Crazy Time.
+Stack: frontend in `frontend/`, backend API in `backend/`.
 
 ---
 
-## Indice (parti da qui se non sai da dove iniziare)
-
-1. [Prima volta sul PC (Windows)](#1-prima-volta-sul-pc-windows) — far partire l’app in locale  
-3. [Usare l’app nel browser](#3-usare-lapp-nel-browser) — dashboard e `/connect`  
----
-
-## 1) Prima volta sul PC (Windows)
+## Avvio rapido (Windows)
 
 ### Cosa ti serve installato
 
@@ -53,18 +46,16 @@ Si aprono di solito **due finestre**:
 `avvio.bat` imposta anche variabili utili (es. **72 ore** di cronologia casino per Playwright, storico fino a **5000** giocate in locale). Per modificarle, apri `avvio.bat` con un editor di testo.
 
 ---
-## 3) Usare l’app nel browser
+## Uso nel browser
 
-- **Dashboard pubblica (senza login)** — tipicamente:  
+- **Dashboard** — tipicamente:  
   `http://localhost:5173/dashboard`  
-  Mostra ultimi esiti, mini cervelli, statistiche live (secondo configurazione API pubblica).
-
-- **`/connect`** — guida per configurare il bot Telegram e le variabili `.env` (nessun form di login).
+  Mostra ultimi esiti, mini cervelli e statistiche live.
 
 Se il frontend non parla col backend, controlla **`frontend\.env`**: deve esserci qualcosa come `VITE_API_URL=http://127.0.0.1:8000`.
 
 ---
-## 5) Note su dati e sicurezza
+## Note dati e sicurezza
 
 - **Cronologia / pattern in locale** (desktop): file tipo `backend/public_history.json` e `backend/public_patterns.json` (vedi `.gitignore`: di solito non vanno su GitHub).  
 - **In produzione** imposta sempre `SECRET_KEY` lungo e unico nel `.env` / pannello Render — non usare mai il placeholder di esempio in produzione.  

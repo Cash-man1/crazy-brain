@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { Brain } from 'lucide-react'
 import LegalFooter from '../components/LegalFooter'
 import InstagramMarkLink from '../components/InstagramMarkLink'
@@ -170,9 +169,6 @@ export default function LiveDashboardNoAuth() {
                   Fonte
                 </button>
                 <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <Link className="btn btn-primary" to="/connect">
-                    Segnali su Telegram (config bot)
-                  </Link>
                   <InstagramMarkLink
                     href={instagramHref}
                     title={
@@ -182,10 +178,6 @@ export default function LiveDashboardNoAuth() {
                     }
                     className="btn btn-secondary"
                   />
-                  <div className="description" style={{ marginLeft: 4 }}>
-                    I segnali via Telegram: vedi <strong>/connect</strong> — solo variabili sul backend, nessun login
-                    nell’app.
-                  </div>
                 </div>
               </div>
             </div>
