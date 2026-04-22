@@ -1,27 +1,40 @@
 # Crazy Brain
 
-Guida semplice semplice per avviare il progetto in locale su Windows.
+Guida super semplice per usare Crazy Brain su Windows.
 
-Se non sei pratico: segui i passaggi in ordine e funziona.
+Questa guida dice solo:
+
+- cosa installare
+- come installarlo
+- come avviare il programma
+
+Niente parti tecniche da sviluppatore.
 
 ---
 
-## 1) Cosa installare prima
+## 1) Cosa devi installare (Windows)
 
-Ti servono solo queste cose:
+Installa queste 3 cose, in questo ordine:
 
-- **Windows 10/11**
-- **Git**: [https://git-scm.com](https://git-scm.com)
-- **Node.js LTS**: [https://nodejs.org](https://nodejs.org)
-- **Python 3.10+**: [https://www.python.org](https://www.python.org)
+1. **Git**: [https://git-scm.com/download/win](https://git-scm.com/download/win)
+2. **Node.js LTS**: [https://nodejs.org/en/download](https://nodejs.org/en/download)
+3. **Python 3.10+**: [https://www.python.org/downloads/windows/](https://www.python.org/downloads/windows/)
 
-Quando installi Python, spunta **Add Python to PATH**.
+Quando installi Python:
+
+- metti la spunta su **Add Python to PATH**
+- poi fai **Install Now**
+
+Quando installi Git e Node.js:
+
+- lascia le opzioni di default
+- clicca sempre **Next** fino a **Finish**
 
 ---
 
 ## 2) Scarica il progetto
 
-Apri PowerShell nella cartella dove tieni i progetti e incolla:
+Apri PowerShell e incolla:
 
 ```powershell
 git clone https://github.com/Cash-man1/crazy-brain.git
@@ -30,24 +43,17 @@ cd crazy-brain
 
 ---
 
-## 3) Primo avvio (solo una volta)
+## 3) Primo setup (una sola volta)
 
-Nella cartella del progetto, fai doppio clic su:
+Apri la cartella del progetto e fai doppio clic su:
 
 `setup.bat`
 
-Aspetta che finisca.
-
-Cosa fa:
-
-- prepara Python (`.venv`)
-- installa pacchetti backend
-- installa pacchetti frontend
-- crea file `.env` base se mancano
+Aspetta la fine completa. Non chiudere le finestre durante il setup.
 
 ---
 
-## 4) Avvio normale (ogni volta)
+## 4) Avvio dell'app (ogni volta)
 
 Fai doppio clic su:
 
@@ -58,72 +64,52 @@ Si aprono due finestre:
 - backend su `http://127.0.0.1:8000`
 - frontend su `http://localhost:5173`
 
-Poi apri nel browser:
+Quando parte, apri questo link nel browser:
 
 `http://localhost:5173/dashboard`
 
 ---
 
-## 5) Controllo veloce (30 secondi)
+## 5) Stop dell'app
 
-Per capire se tutto e ok:
+Per chiudere tutto in modo pulito:
 
-1. Apri `http://127.0.0.1:8000/health`
-2. Deve rispondere con stato `healthy`
-3. Apri `http://localhost:5173/dashboard`
-4. Deve caricarsi la dashboard
+- fai doppio clic su `chiudi.bat`
 
 ---
 
-## 6) Se non parte (soluzioni rapide)
+## 6) Guida visuale rapida (screen da seguire)
 
-### Errore Python non trovato
-
-- reinstalla Python 3.10+
-- durante installazione attiva **Add Python to PATH**
-- rilancia `setup.bat`
-
-### Errore npm / node
-
-- installa Node.js LTS
-- rilancia `setup.bat`
-
-### Frontend aperto ma senza dati
-
-- verifica che backend sia acceso
-- controlla `http://127.0.0.1:8000/health`
-- controlla file `frontend/.env`:
-
-```env
-VITE_API_URL=http://127.0.0.1:8000
-```
-
-### Porta occupata
-
-- chiudi vecchie finestre terminale del progetto
-- chiudi eventuali vecchi `uvicorn` o `node`
-- rilancia `avvio.bat`
+- **Schermata 1:** cartella progetto aperta
+- **Schermata 2:** doppio clic su `setup.bat` (solo la prima volta)
+- **Schermata 3:** doppio clic su `avvio.bat`
+- **Schermata 4:** browser su `http://localhost:5173/dashboard`
 
 ---
 
-## 7) Dove salva i dati locali
+## 7) Se non va (soluzione veloce)
 
-File utili in locale:
+### Caso A - Non parte nulla
 
-- `backend/public_history.json`
-- `backend/public_patterns.json`
+- riavvia il PC
+- riesegui `setup.bat`
+- poi riesegui `avvio.bat`
 
-Sono dati locali del tuo PC.
+### Caso B - Errore Python
 
----
+- reinstalla Python da [python.org](https://www.python.org/downloads/windows/)
+- spunta **Add Python to PATH**
+- rifai `setup.bat`
 
-## 8) Nota su sorgente dati
+### Caso C - Errore Node / npm
 
-Di default `avvio.bat` usa:
+- reinstalla Node.js LTS da [nodejs.org](https://nodejs.org/en/download)
+- rifai `setup.bat`
 
-- API Evolution (`SCRAPER_USE_EVOLUTION_API=1`)
-- fallback Playwright se serve (`SCRAPER_PLAYWRIGHT_FALLBACK=1`)
+### Caso D - Si apre ma non carica
 
-Se vuoi forzare sola lettura HTML, in `avvio.bat` metti:
+- chiudi con `chiudi.bat`
+- riapri con `avvio.bat`
+- aspetta 20-30 secondi e ricarica la pagina
 
-`SCRAPER_USE_EVOLUTION_API=0`
+Se ancora non va, rifai da capo i passi 1 -> 4.
