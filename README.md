@@ -1,26 +1,16 @@
 # Crazy Brain
 
-Guida super semplice per usare Crazy Brain su **macOS**.
-
-Questa guida dice solo:
-
-- cosa installare
-- come installarlo
-- come avviare il programma
-
-Niente parti tecniche da sviluppatore.
+Guida veloce per usare Crazy Brain su **macOS** in modo plug-and-play.
 
 ---
 
-## 1) Cosa devi installare (Mac)
+## 1) Installa queste cose (una volta)
 
-Installa queste 3 cose, in questo ordine:
+- **Git**: [https://git-scm.com/download/mac](https://git-scm.com/download/mac)
+- **Node.js LTS**: [https://nodejs.org/en/download](https://nodejs.org/en/download)
+- **Python 3.10+**: [https://www.python.org/downloads/macos/](https://www.python.org/downloads/macos/)
 
-1. **Git**: [https://git-scm.com/download/mac](https://git-scm.com/download/mac)
-2. **Node.js LTS**: [https://nodejs.org/en/download](https://nodejs.org/en/download)
-3. **Python 3.10+**: [https://www.python.org/downloads/macos/](https://www.python.org/downloads/macos/)
-
-Puoi installare anche da Homebrew (consigliato):
+Alternativa comoda:
 
 ```bash
 brew install git node python
@@ -30,7 +20,7 @@ brew install git node python
 
 ## 2) Scarica il progetto
 
-Apri il **Terminale** e incolla:
+Apri Terminale e incolla:
 
 ```bash
 git clone https://github.com/Cash-man1/crazy-brain.git
@@ -39,89 +29,37 @@ cd crazy-brain
 
 ---
 
-## 3) Primo setup (una sola volta)
-
-Nel Terminale, dentro la cartella `crazy-brain`, esegui:
+## 3) Primo setup Mac (una sola volta)
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r backend/requirements.txt
-cd backend && playwright install chromium && cd ..
-cd frontend && npm ci && cd ..
+chmod +x setup-mac.sh avvio-mac.sh chiudi-mac.sh
+./setup-mac.sh
 ```
-
-Aspetta la fine completa. Non chiudere le finestre durante il setup.
 
 ---
 
-## 4) Avvio dell'app (ogni volta)
-
-Apri **2 finestre Terminale** nella cartella `crazy-brain`.
-
-### Terminale 1 (backend)
+## 4) Avvio Mac (ogni volta)
 
 ```bash
-source .venv/bin/activate
-cd backend
-uvicorn main:app --reload --host 127.0.0.1 --port 8000
+./avvio-mac.sh
 ```
 
-### Terminale 2 (frontend)
-
-```bash
-cd frontend
-npm run dev
-```
-
-Quando parte, apri questo link nel browser:
+Poi apri:
 
 `http://localhost:5173/dashboard`
 
 ---
 
-## 5) Stop dell'app
+## 5) Chiusura Mac
 
-Per chiudere tutto in modo pulito, in entrambi i terminali premi:
-
-`Ctrl + C`
-
----
-
-## 6) Guida visuale rapida (Mac)
-
-- **Schermata 1:** Terminale con `git clone ...`
-- **Schermata 2:** Terminale con setup completato (venv + pip + npm)
-- **Schermata 3:** due terminali aperti (backend + frontend)
-- **Schermata 4:** browser su `http://localhost:5173/dashboard`
+```bash
+./chiudi-mac.sh
+```
 
 ---
 
-## 7) Se non va (soluzione veloce)
+## 6) Se non parte
 
-### Caso A - Non parte nulla
-
-- chiudi i terminali
-- riapri il Mac
-- rifai i passi da 3 a 4
-
-### Caso B - Errore Python
-
-- reinstalla Python da [python.org](https://www.python.org/downloads/macos/)
-- oppure: `brew install python`
-- rifai il passo 3
-
-### Caso C - Errore Node / npm
-
-- reinstalla Node.js LTS da [nodejs.org](https://nodejs.org/en/download)
-- oppure: `brew install node`
-- rifai il passo 3
-
-### Caso D - Si apre ma non carica
-
+- rifai setup: `./setup-mac.sh`
+- poi riavvia: `./avvio-mac.sh`
 - controlla backend: `http://127.0.0.1:8000/health`
-- se non risponde, riavvia solo il terminale backend
-- se risponde, ricarica la dashboard dopo 20-30 secondi
-
-Se ancora non va, rifai da capo i passi 1 -> 4.
