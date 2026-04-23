@@ -14,19 +14,12 @@ import logging
 import sys
 import asyncio
 import os
-from typing import Coroutine, Any
 
 from config import get_settings
-from database import init_db, AsyncSessionLocal, ensure_default_accounts, ensure_phone_admin_account
+from database import init_db
 from security import limiter
-from api_auth import router as auth_router
-from api_stripe import router as stripe_router
 from api_brain import router as brain_router
 from api_brain import start_public_ingestion_loop, stop_public_ingestion_loop
-from api_admin import router as admin_router
-from api_chat import router as chat_router
-from api_notify import router as notify_router
-from config import VIP_USERS
 
 settings = get_settings()
 
@@ -41,56 +34,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _spawn_bg_task(coro: Coroutine[Any, Any, Any], name: str) -> asyncio.Task:
-    logger.info("Starting background task: %s", name)
-    task = asyncio.create_task(coro, name=name)
-
-    def _on_done(t: asyncio.Task) -> None:
-        try:
-            exc = t.exception()
-        except asyncio.CancelledError:
-            logger.info("Background task cancelled: %s", name)
-            return
-        except BaseException:
-            logger.exception("Background task retrieval failed: %s", name)
-            return
-
-        if exc is not None:
-            logger.exception("Background task crashed: %s", name, exc_info=exc)
-        else:
-            logger.info("Background task finished: %s", name)
-
-    task.add_done_callback(_on_done)
-    return task
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Crazy Brain SaaS...")
     
     await init_db()
     logger.info("Database initialized")
-
-    async def _ensure_defaults_background() -> None:
-        try:
-            async with AsyncSessionLocal() as db:
-                await ensure_default_accounts(
-                    db,
-                    admin_email=settings.ADMIN_EMAIL,
-                    admin_password=settings.ADMIN_PASSWORD,
-                    vip_users=VIP_USERS,
-                )
-                await ensure_phone_admin_account(
-                    db,
-                    phone_number=settings.ADMIN_PHONE_NUMBER,
-                    password=settings.ADMIN_PHONE_PASSWORD,
-                )
-            logger.info("Default accounts ensured")
-        except Exception:
-            logger.exception("Failed ensuring default accounts")
-
-    # Do not block startup on default-account bootstrap; keeps Render port detection stable.
-    _spawn_bg_task(_ensure_defaults_background(), "ensure-default-accounts")
 
     logger.info("Application started successfully!")
 
@@ -263,7 +212,7 @@ async def forbidden_handler(request: Request, exc):
 @app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {
-        "name": "Crazy Brain SaaS API",
+        "name": "Crazy Brain API",
         "version": "1.0.0",
         "status": "operational",
         "environment": settings.ENVIRONMENT
@@ -282,12 +231,7 @@ async def health_check():
     }
 
 
-app.include_router(auth_router, prefix="/api")
-app.include_router(stripe_router, prefix="/api")
 app.include_router(brain_router, prefix="/api")
-app.include_router(admin_router, prefix="/api")
-app.include_router(chat_router, prefix="/api")
-app.include_router(notify_router, prefix="/api")
 
 
 # ================= START =================
