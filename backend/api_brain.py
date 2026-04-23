@@ -53,11 +53,25 @@ def _iso_utc_z(dt: Optional[datetime] = None) -> str:
 SCRAPE_WORKER = Path(__file__).resolve().parent / "scrape_worker.py"
 WORKER_PYTHON = Path(__file__).resolve().parent.parent / ".venv" / "Scripts" / "python.exe"
 MAX_ALLOWED_SOURCE_LAG_SECONDS = 20
-SCRAPE_RETRY_ATTEMPTS = 2
+# Modalità low-latency: un solo tentativo per ciclo (evita accumulo ritardi lunghi).
+SCRAPE_RETRY_ATTEMPTS = 1
 SOURCE_FAILURE_THRESHOLD = 3
 
 
-def _run_scrape_worker(limit: int = 60) -> Dict[str, Any]:
+def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = (os.getenv(name, str(default)) or "").strip()
+    try:
+        value = int(raw)
+    except Exception:
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+PUBLIC_BOOTSTRAP_WORKER_LIMIT = _env_int("PUBLIC_BOOTSTRAP_WORKER_LIMIT", 5000, 100, 20000)
+PUBLIC_LIVE_WORKER_LIMIT = _env_int("PUBLIC_LIVE_WORKER_LIMIT", 120, 20, 5000)
+
+
+def _run_scrape_worker(limit: int = 60, hours_override: Optional[int] = None) -> Dict[str, Any]:
     python_bin = str(WORKER_PYTHON) if WORKER_PYTHON.exists() else sys.executable
     cmd = [
         python_bin,
@@ -67,8 +81,15 @@ def _run_scrape_worker(limit: int = 60) -> Dict[str, Any]:
         "--screenshot-prefix",
         "cronologia",
     ]
-    # Render Free tier + Chromium cold start: networkidle can exceed 70s; keep headroom.
-    timeout_sec = 120 if limit <= 120 else 150
+    if hours_override and int(hours_override) > 0:
+        cmd += ["--hours", str(int(hours_override))]
+    # Per limiti alti (storico profondo) Playwright richiede più tempo.
+    if limit <= 120:
+        timeout_sec = 90
+    elif limit <= 1000:
+        timeout_sec = 150
+    else:
+        timeout_sec = 240
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"worker rc={proc.returncode}")
@@ -79,7 +100,24 @@ def _run_scrape_worker(limit: int = 60) -> Dict[str, Any]:
     return payload
 
 
-def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
+def _scrape_hours_for_phase(is_bootstrap: bool) -> int:
+    """
+    Boot iniziale con finestra lunga, poi finestra più corta e reattiva.
+    - SCRAPER_CRONOLOGIA_HOURS_BOOTSTRAP (default 72)
+    - SCRAPER_CRONOLOGIA_HOURS_LIVE (default 6)
+    """
+    key = "SCRAPER_CRONOLOGIA_HOURS_BOOTSTRAP" if is_bootstrap else "SCRAPER_CRONOLOGIA_HOURS_LIVE"
+    raw = (os.getenv(key) or os.getenv("SCRAPER_CRONOLOGIA_HOURS") or ("72" if is_bootstrap else "6")).strip()
+    try:
+        hours = int(raw)
+    except ValueError:
+        hours = 72 if is_bootstrap else 6
+    if hours not in (1, 6, 12, 24, 48, 72):
+        hours = 72 if is_bootstrap else 6
+    return hours
+
+
+def _run_scrape_worker_fresh(limit: int, *, is_bootstrap: bool = False) -> Dict[str, Any]:
     """
     Esegue lo scrape e, se la sorgente e' in ritardo oltre soglia, riprova subito
     scegliendo il payload con lag migliore.
@@ -127,9 +165,10 @@ def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
     best_rows: List[Dict[str, Any]] = []
     best_lag: Optional[int] = None
 
+    hours_override = _scrape_hours_for_phase(is_bootstrap)
     for _ in range(max(1, SCRAPE_RETRY_ATTEMPTS)):
         try:
-            payload = _run_scrape_worker(limit=limit)
+            payload = _run_scrape_worker(limit=limit, hours_override=hours_override)
         except Exception as exc:
             last_worker_error = f"{type(exc).__name__}: {str(exc)}"
             payload = {"rows": [], "screenshot": None, "_worker_debug": last_worker_error}
@@ -161,6 +200,23 @@ def _run_scrape_worker_fresh(limit: int) -> Dict[str, Any]:
         if diag:
             best_payload["_worker_debug"] = diag
     return best_payload
+
+
+def _select_public_worker_limit(state: Dict[str, Any]) -> int:
+    """
+    Se lo storico persistito non e' ancora pieno, mantieni backfill profondo.
+    Quando arriva a capienza, torna al limite live leggero.
+    """
+    is_bootstrap = len(state.get("seen") or set()) == 0
+    if is_bootstrap:
+        return PUBLIC_BOOTSTRAP_WORKER_LIMIT
+    try:
+        saved_rows = len(_load_public_history())
+    except Exception:
+        saved_rows = 0
+    if saved_rows < PUBLIC_HISTORY_MAX_ITEMS:
+        return PUBLIC_BOOTSTRAP_WORKER_LIMIT
+    return PUBLIC_LIVE_WORKER_LIMIT
 
 
 def _time_lag_seconds(rows: List[Dict[str, Any]]) -> Optional[int]:
@@ -239,8 +295,8 @@ async def refresh_public_cache_once() -> None:
 
     try:
         is_bootstrap = len(state.get("seen") or set()) == 0
-        worker_limit = 40 if is_bootstrap else 25
-        payload = await asyncio.to_thread(_run_scrape_worker_fresh, worker_limit)
+        worker_limit = _select_public_worker_limit(state)
+        payload = await asyncio.to_thread(_run_scrape_worker_fresh, worker_limit, is_bootstrap=is_bootstrap)
         fetched_rows = payload.get("rows") or []
         lag_seconds = _time_lag_seconds(fetched_rows)
         parsed_rows = _clean_rows(fetched_rows)
@@ -1063,8 +1119,8 @@ async def auto_brain_public():
             new_count_local = 0
             try:
                 is_bootstrap = len(state.get("seen") or set()) == 0
-                worker_limit = 40 if is_bootstrap else 25
-                payload = await asyncio.to_thread(_run_scrape_worker_fresh, worker_limit)
+                worker_limit = _select_public_worker_limit(state)
+                payload = await asyncio.to_thread(_run_scrape_worker_fresh, worker_limit, is_bootstrap=is_bootstrap)
                 fetched_rows = payload.get("rows") or []
                 lag_seconds = _time_lag_seconds(fetched_rows)
                 parsed_rows = _clean_rows(fetched_rows)

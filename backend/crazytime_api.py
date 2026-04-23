@@ -154,9 +154,10 @@ def _row_from_event(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def fetch_evolution_crazytime_rows(limit: int = 40, timeout: float = 12.0) -> List[Dict[str, Any]]:
     """Scarica gli ultimi round da API JSON (nessun browser). Ordine: più recente per primo."""
-    lim = max(1, min(int(limit), 80))
+    lim = max(1, min(int(limit), 5000))
     with httpx.Client(timeout=timeout, follow_redirects=True, headers=_HEADERS) as client:
-        r = client.get(EVOLUTION_CRAZY_TIME_EVENTS_URL)
+        # L'endpoint supporta "size": consente storico molto più ampio rispetto al default.
+        r = client.get(EVOLUTION_CRAZY_TIME_EVENTS_URL, params={"size": lim})
         r.raise_for_status()
         payload = r.json()
     if not isinstance(payload, list):

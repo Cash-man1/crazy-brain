@@ -8,15 +8,24 @@ if not exist ".venv\Scripts\python.exe" (
   pause
   exit /b 1
 )
-if not exist "frontend\node_modules\" (
-  echo Manca frontend\node_modules. Esegui prima setup.bat
+if not exist "frontend\node_modules\.bin\vite.cmd" (
+  echo Frontend non pronto: vite mancante in frontend\node_modules\.bin
+  echo Esegui setup.bat e attendi "Setup completato".
   pause
   exit /b 1
 )
+for %%P in (8000 5173) do (
+  netstat -ano | findstr /R /C:":%%P .*LISTENING" >nul
+  if not errorlevel 1 (
+    echo Porta %%P gia in uso. Chiudi prima processi precedenti con chiudi.bat
+    pause
+    exit /b 1
+  )
+)
 
 :: --- Desktop locale: API + dashboard (dati live come in produzione, senza Render) ---
-set BACKEND_PORT=8010
-set FRONTEND_PORT=5180
+set BACKEND_PORT=8000
+set FRONTEND_PORT=5173
 set ENVIRONMENT=development
 set FRONTEND_URL=http://localhost:%FRONTEND_PORT%
 set CORS_EXTRA_ORIGINS=http://localhost:%FRONTEND_PORT%,http://127.0.0.1:%FRONTEND_PORT%
@@ -27,11 +36,17 @@ set "DASHBOARD_URL=http://localhost:%FRONTEND_PORT%/dashboard"
 set "SOURCE_READ_URL=https://www.casino.org/casinoscores/it/crazy-time/"
 
 :: 1 = API JSON Evolution (stessi ultimi esiti/orari, leggero). 0 = solo Playwright sulla pagina HTML casino.org
-set SCRAPER_USE_EVOLUTION_API=1
+set SCRAPER_USE_EVOLUTION_API=0
 :: Se Evolution fallisce, usa Playwright ^(richiede chromium da setup.bat^)
 set SCRAPER_PLAYWRIGHT_FALLBACK=1
-:: Ore di cronologia da selezionare sulla pagina casino (1,6,12,24,48,72) quando usi Playwright
+:: Ore cronologia Playwright:
+:: - bootstrap iniziale (prima lettura a caldo): 72h per dare base al cervello
+:: - live normale dopo bootstrap: 72h (il cervello resta incrementale: aggiunge solo i nuovi esiti)
+set SCRAPER_CRONOLOGIA_HOURS_BOOTSTRAP=72
+set SCRAPER_CRONOLOGIA_HOURS_LIVE=72
 set SCRAPER_CRONOLOGIA_HOURS=72
+set PUBLIC_BOOTSTRAP_WORKER_LIMIT=5000
+set PUBLIC_LIVE_WORKER_LIMIT=5000
 :: Storico persistito su disco (max righe in public_history.json)
 set PUBLIC_HISTORY_MAX_ITEMS=5000
 

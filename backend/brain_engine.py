@@ -1145,6 +1145,24 @@ class BrainEngine:
         evs = getattr(self.meta_brain, "evs", None) or {}
         if not evs:
             return None
+        # Evita che alcuni segmenti restino perennemente a 0 tentativi in modalita continua:
+        # quando il campione cresce, inserisce periodicamente una previsione "exploration".
+        try:
+            unseen = [
+                seg for seg in ALL_SEGMENTS
+                if int((self.prediction_stats_continuous.get(seg) or {}).get("attempts") or 0) == 0
+            ]
+            if unseen and self.spin_count >= 120 and (self.spin_count % 25 == 0):
+                # Preferisci il segmento "non visto" con confidence_raw piu alta.
+                ranked = sorted(
+                    unseen,
+                    key=lambda s: float((self.mini_brains.get(s).state.confidence_raw if self.mini_brains.get(s) else 0.0)),
+                    reverse=True,
+                )
+                if ranked:
+                    return ranked[0]
+        except Exception:
+            pass
         best_seg = max(evs.items(), key=lambda kv: (kv[1], kv[0]))[0]
         return best_seg if best_seg in ALL_SEGMENTS else None
 

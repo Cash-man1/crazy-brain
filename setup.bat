@@ -13,10 +13,35 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" >nul 2>nul
+if errorlevel 1 (
+  echo ERRORE: versione Python non supportata. Serve Python 3.10 o superiore.
+  python --version
+  pause
+  exit /b 1
+)
 
 where node >nul 2>nul
 if errorlevel 1 (
   echo ERRORE: Node.js non trovato nel PATH. Serve per il frontend ^(npm^).
+  pause
+  exit /b 1
+)
+for /f "tokens=1 delims=." %%V in ('node -p "process.versions.node" 2^>nul') do set NODE_MAJOR=%%V
+if not defined NODE_MAJOR (
+  echo ERRORE: impossibile leggere la versione di Node.js.
+  pause
+  exit /b 1
+)
+if %NODE_MAJOR% LSS 18 (
+  echo ERRORE: Node.js troppo vecchio. Installa Node.js LTS ^(18+^).
+  node -v
+  pause
+  exit /b 1
+)
+where npm >nul 2>nul
+if errorlevel 1 (
+  echo ERRORE: npm non trovato nel PATH. Reinstalla Node.js LTS.
   pause
   exit /b 1
 )
@@ -54,13 +79,34 @@ pushd frontend
 if not exist "node_modules\" (
   call npm ci
   if errorlevel 1 (
-    popd
-    echo npm ci fallito. Prova: npm install
-    pause
-    exit /b 1
+    echo npm ci fallito, provo fallback con npm install...
+    call npm install
+    if errorlevel 1 (
+      popd
+      echo npm install fallito. Controlla connessione e versione Node.js.
+      pause
+      exit /b 1
+    )
   )
 ) else (
   echo node_modules gia presente, salto npm ci.
+)
+if not exist "node_modules\.bin\vite.cmd" (
+  echo vite non trovato in node_modules. Provo npm install per ripristinare pacchetti...
+  call npm install
+  if errorlevel 1 (
+    popd
+    echo Ripristino frontend fallito. Apri frontend e lancia: npm install
+    pause
+    exit /b 1
+  )
+)
+if not exist "node_modules\.bin\vite.cmd" (
+  popd
+  echo ERRORE: vite resta non disponibile dopo installazione frontend.
+  echo Verifica Node.js LTS e riprova setup.bat.
+  pause
+  exit /b 1
 )
 popd
 

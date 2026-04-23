@@ -33,7 +33,14 @@ def _trim_screenshot_dir(directory: Path, keep: int) -> None:
         pass
 
 
-def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window_pos: Tuple[int, int], window_size: Tuple[int, int]):
+def _scrape(
+    limit: int,
+    screenshot_prefix: Optional[str],
+    headless: bool,
+    window_pos: Tuple[int, int],
+    window_size: Tuple[int, int],
+    hours_override: Optional[int] = None,
+):
     with sync_playwright() as pw:
         def _log(step: str) -> None:
             print(f"[worker] {step}", file=sys.stderr, flush=True)
@@ -145,7 +152,7 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         # Important: the time-range controls sometimes mount only after scrolling to the table area.
         _ensure_cronologia_in_view()
         try:
-            raw_h = (os.getenv("SCRAPER_CRONOLOGIA_HOURS") or "6").strip()
+            raw_h = str(hours_override) if hours_override is not None else (os.getenv("SCRAPER_CRONOLOGIA_HOURS") or "6").strip()
             try:
                 hours_sel = int(raw_h)
             except ValueError:
@@ -412,21 +419,31 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
         # to load more rows until we reach the desired limit.
         target_limit = limit
         extracted: List[Dict[str, Any]] = []
-        seen_keys: set[str] = set()
+        # Per evitare di perdere righe valide con stessa chiave (stesso minuto/esito),
+        # teniamo il conteggio delle occorrenze per chiave.
+        emitted_counts: Dict[str, int] = {}
         stable_rounds = 0
         table_locator = page.locator("table").filter(has=page.get_by_text(re.compile(r"Risultato\\s+Slot", re.IGNORECASE)))
         # Keep scraping bounded for server runtimes (Render).
-        for _ in range(28):
-            if (time.monotonic() - started_at) > 30:
+        deep_history = target_limit >= 1000
+        max_rounds = 260 if deep_history else 40
+        max_stable_rounds = 45 if deep_history else 8
+        max_seconds = 180 if deep_history else 45
+        for _ in range(max_rounds):
+            if (time.monotonic() - started_at) > max_seconds:
                 _log("time budget exceeded during extraction loop")
                 break
             batch: List[Dict[str, Any]] = extract_rows()
             grew = False
+            batch_seen: Dict[str, int] = {}
             for r in batch:
                 k = f"{r.get('datetime_text')}|{r.get('slot_result')}|{r.get('wheel_result')}|{','.join(str(x) for x in (r.get('top_slot_multipliers') or []))}"
-                if k in seen_keys:
+                occ = int(batch_seen.get(k, 0)) + 1
+                batch_seen[k] = occ
+                already = int(emitted_counts.get(k, 0))
+                if occ <= already:
                     continue
-                seen_keys.add(k)
+                emitted_counts[k] = occ
                 extracted.append(r)
                 grew = True
             if len(extracted) >= target_limit:
@@ -435,7 +452,7 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
                 stable_rounds += 1
             else:
                 stable_rounds = 0
-            if stable_rounds >= 6:
+            if stable_rounds >= max_stable_rounds:
                 break
             try:
                 page.evaluate(
@@ -470,10 +487,10 @@ def _scrape(limit: int, screenshot_prefix: Optional[str], headless: bool, window
                 if table_locator.count() > 0:
                     table_locator.first.hover(timeout=1000)
                 # Some versions only load more rows on wheel scrolling.
-                page.mouse.wheel(0, 2200)
+                page.mouse.wheel(0, 3600 if deep_history else 2200)
             except Exception:
                 pass
-            page.wait_for_timeout(450)
+            page.wait_for_timeout(650 if deep_history else 450)
         if not extracted:
             try:
                 page.wait_for_timeout(1200)
@@ -583,6 +600,7 @@ def main() -> int:
     ap.add_argument("--y", type=int, default=0)
     ap.add_argument("--w", type=int, default=960)
     ap.add_argument("--h", type=int, default=1040)
+    ap.add_argument("--hours", type=int, default=0)
     args = ap.parse_args()
 
     extracted, shot = _scrape(
@@ -591,6 +609,7 @@ def main() -> int:
         headless=True,
         window_pos=(args.x, args.y),
         window_size=(args.w, args.h),
+        hours_override=(args.hours if args.hours and args.hours > 0 else None),
     )
     # Use ASCII-escaped JSON to avoid Windows cp1252 stdout encoding crashes.
     sys.stdout.write(json.dumps({"rows": extracted, "screenshot": shot}, ensure_ascii=True))
