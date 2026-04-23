@@ -15,13 +15,15 @@ if not exist "frontend\node_modules\" (
 )
 
 :: --- Desktop locale: API + dashboard (dati live come in produzione, senza Render) ---
+set BACKEND_PORT=8010
+set FRONTEND_PORT=5180
 set ENVIRONMENT=development
-set FRONTEND_URL=http://localhost:5173
-set CORS_EXTRA_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+set FRONTEND_URL=http://localhost:%FRONTEND_PORT%
+set CORS_EXTRA_ORIGINS=http://localhost:%FRONTEND_PORT%,http://127.0.0.1:%FRONTEND_PORT%
 set PUBLIC_INGESTION_ENABLED=1
 set LIVE_ROWS_FROM_REDIS=0
 set REDIS_URL=
-set "DASHBOARD_URL=http://localhost:5173/dashboard"
+set "DASHBOARD_URL=http://localhost:%FRONTEND_PORT%/dashboard"
 set "SOURCE_READ_URL=https://www.casino.org/casinoscores/it/crazy-time/"
 
 :: 1 = API JSON Evolution (stessi ultimi esiti/orari, leggero). 0 = solo Playwright sulla pagina HTML casino.org
@@ -33,17 +35,15 @@ set SCRAPER_CRONOLOGIA_HOURS=72
 :: Storico persistito su disco (max righe in public_history.json)
 set PUBLIC_HISTORY_MAX_ITEMS=5000
 
-if not exist "frontend\.env" (
-  > "frontend\.env" echo VITE_API_URL=http://127.0.0.1:8000
-)
+> "frontend\.env" echo VITE_API_URL=http://127.0.0.1:%BACKEND_PORT%
 
-echo Avvio backend su http://127.0.0.1:8000 ...
-start "Crazy Brain API" cmd /k cd /d "%ROOT%" ^& call "%ROOT%.venv\Scripts\activate.bat" ^& cd /d "%ROOT%backend" ^& uvicorn main:app --reload --host 127.0.0.1 --port 8000
+echo Avvio backend su http://127.0.0.1:%BACKEND_PORT% ...
+start "Crazy Brain API" cmd /k cd /d "%ROOT%" ^& call "%ROOT%.venv\Scripts\activate.bat" ^& cd /d "%ROOT%backend" ^& uvicorn main:app --reload --host 127.0.0.1 --port %BACKEND_PORT%
 
 timeout /t 4 /nobreak >nul
 
 echo Avvio frontend Vite...
-start "Crazy Brain Web" cmd /k cd /d "%ROOT%frontend" ^& npm run dev
+start "Crazy Brain Web" cmd /k cd /d "%ROOT%frontend" ^& npm run dev -- --host 127.0.0.1 --port %FRONTEND_PORT% --strictPort
 
 timeout /t 5 /nobreak >nul
 echo Apro automaticamente dashboard e pagina sorgente...
@@ -51,7 +51,7 @@ start "" "%DASHBOARD_URL%"
 start "" "%SOURCE_READ_URL%"
 
 echo.
-echo Backend:  http://127.0.0.1:8000   (health: /health)
+echo Backend:  http://127.0.0.1:%BACKEND_PORT%   (health: /health)
 echo Frontend: %DASHBOARD_URL%
 echo Sorgente lettura: %SOURCE_READ_URL%
 echo Dashboard pubblica: /brain/... come da menu dell'app
