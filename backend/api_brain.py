@@ -69,6 +69,7 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 PUBLIC_BOOTSTRAP_WORKER_LIMIT = _env_int("PUBLIC_BOOTSTRAP_WORKER_LIMIT", 5000, 100, 20000)
 PUBLIC_LIVE_WORKER_LIMIT = _env_int("PUBLIC_LIVE_WORKER_LIMIT", 120, 20, 5000)
+PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS = _env_int("PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS", 90, 10, 900)
 
 
 def _run_scrape_worker(limit: int = 60, hours_override: Optional[int] = None) -> Dict[str, Any]:
@@ -209,13 +210,23 @@ def _select_public_worker_limit(state: Dict[str, Any]) -> int:
     """
     is_bootstrap = len(state.get("seen") or set()) == 0
     if is_bootstrap:
+        state["last_deep_backfill_at"] = datetime.utcnow()
         return PUBLIC_BOOTSTRAP_WORKER_LIMIT
     try:
         saved_rows = len(_load_public_history())
     except Exception:
         saved_rows = 0
     if saved_rows < PUBLIC_HISTORY_MAX_ITEMS:
-        return PUBLIC_BOOTSTRAP_WORKER_LIMIT
+        last_backfill = state.get("last_deep_backfill_at")
+        elapsed = (
+            (datetime.utcnow() - last_backfill).total_seconds()
+            if isinstance(last_backfill, datetime)
+            else 10**9
+        )
+        if elapsed >= PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS:
+            state["last_deep_backfill_at"] = datetime.utcnow()
+            return PUBLIC_BOOTSTRAP_WORKER_LIMIT
+        return PUBLIC_LIVE_WORKER_LIMIT
     return PUBLIC_LIVE_WORKER_LIMIT
 
 
@@ -286,7 +297,13 @@ async def refresh_public_cache_once() -> None:
 
     state = auto_state.setdefault(
         user_id,
-        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": [], "consecutive_failures": 0}
+        {
+            "last_poll": datetime.utcnow() - timedelta(seconds=3),
+            "seen": set(),
+            "rows": [],
+            "consecutive_failures": 0,
+            "last_deep_backfill_at": datetime.utcnow() - timedelta(seconds=PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS),
+        }
     )
 
     # Evita refresh concorrenti
@@ -931,7 +948,13 @@ async def auto_brain_status(
 
     state = auto_state.setdefault(
         user_id,
-        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": [], "consecutive_failures": 0}
+        {
+            "last_poll": datetime.utcnow() - timedelta(seconds=3),
+            "seen": set(),
+            "rows": [],
+            "consecutive_failures": 0,
+            "last_deep_backfill_at": datetime.utcnow() - timedelta(seconds=PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS),
+        }
     )
 
     now = datetime.utcnow()
@@ -1025,7 +1048,13 @@ async def auto_brain_public():
 
     state = auto_state.setdefault(
         user_id,
-        {"last_poll": datetime.utcnow() - timedelta(seconds=3), "seen": set(), "rows": [], "consecutive_failures": 0}
+        {
+            "last_poll": datetime.utcnow() - timedelta(seconds=3),
+            "seen": set(),
+            "rows": [],
+            "consecutive_failures": 0,
+            "last_deep_backfill_at": datetime.utcnow() - timedelta(seconds=PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS),
+        }
     )
 
     # Bootstrap from persisted last-6h history (gives confidence immediately after restart).
