@@ -59,7 +59,7 @@ if [[ ! -f "backend/.env" && -f "backend/.env.example" ]]; then
 fi
 
 if [[ ! -f "frontend/.env" ]]; then
-  echo "VITE_API_URL=http://127.0.0.1:8000" > "frontend/.env"
+  echo "VITE_API_URL=http://127.0.0.1:8010" > "frontend/.env"
   echo "Creato frontend/.env"
 fi
 
