@@ -15,13 +15,14 @@ if not exist "frontend\node_modules\" (
 )
 
 :: --- Desktop locale: API + dashboard (dati live come in produzione, senza Render) ---
+set FRONTEND_PORT=5174
 set ENVIRONMENT=development
-set FRONTEND_URL=http://localhost:5173
-set CORS_EXTRA_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+set FRONTEND_URL=http://localhost:%FRONTEND_PORT%
+set CORS_EXTRA_ORIGINS=http://localhost:%FRONTEND_PORT%,http://127.0.0.1:%FRONTEND_PORT%
 set PUBLIC_INGESTION_ENABLED=1
 set LIVE_ROWS_FROM_REDIS=0
 set REDIS_URL=
-set "DASHBOARD_URL=http://localhost:5173/dashboard"
+set "DASHBOARD_URL=http://localhost:%FRONTEND_PORT%/dashboard"
 set "SOURCE_READ_URL=https://www.casino.org/casinoscores/it/crazy-time/"
 
 :: 1 = API JSON Evolution (stessi ultimi esiti/orari, leggero). 0 = solo Playwright sulla pagina HTML casino.org
@@ -43,7 +44,7 @@ start "Crazy Brain API" cmd /k cd /d "%ROOT%" ^& call "%ROOT%.venv\Scripts\activ
 timeout /t 4 /nobreak >nul
 
 echo Avvio frontend Vite...
-start "Crazy Brain Web" cmd /k cd /d "%ROOT%frontend" ^& npm run dev
+start "Crazy Brain Web" cmd /k cd /d "%ROOT%frontend" ^& npm run dev -- --host 127.0.0.1 --port %FRONTEND_PORT% --strictPort
 
 timeout /t 5 /nobreak >nul
 echo Apro automaticamente dashboard e pagina sorgente...
