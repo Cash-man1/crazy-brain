@@ -56,6 +56,7 @@ MAX_ALLOWED_SOURCE_LAG_SECONDS = 20
 # Modalità low-latency: un solo tentativo per ciclo (evita accumulo ritardi lunghi).
 SCRAPE_RETRY_ATTEMPTS = 1
 SOURCE_FAILURE_THRESHOLD = 3
+_evolution_blocked_until: Optional[datetime] = None
 
 
 def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -70,6 +71,7 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
 PUBLIC_BOOTSTRAP_WORKER_LIMIT = _env_int("PUBLIC_BOOTSTRAP_WORKER_LIMIT", 5000, 100, 20000)
 PUBLIC_LIVE_WORKER_LIMIT = _env_int("PUBLIC_LIVE_WORKER_LIMIT", 120, 20, 5000)
 PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS = _env_int("PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS", 90, 10, 900)
+EVOLUTION_BLOCK_COOLDOWN_SECONDS = _env_int("EVOLUTION_BLOCK_COOLDOWN_SECONDS", 3600, 60, 86400)
 
 
 def _run_scrape_worker(limit: int = 60, hours_override: Optional[int] = None) -> Dict[str, Any]:
@@ -141,7 +143,10 @@ def _run_scrape_worker_fresh(limit: int, *, is_bootstrap: bool = False) -> Dict[
         except Exception as exc:
             last_worker_error = f"redis-live: {type(exc).__name__}: {exc}"
 
-    if os.getenv("SCRAPER_USE_EVOLUTION_API", "1").strip().lower() not in ("0", "false", "no"):
+    global _evolution_blocked_until
+    evo_enabled = os.getenv("SCRAPER_USE_EVOLUTION_API", "0").strip().lower() not in ("0", "false", "no")
+    evo_blocked = isinstance(_evolution_blocked_until, datetime) and datetime.utcnow() < _evolution_blocked_until
+    if evo_enabled and not evo_blocked:
         try:
             from crazytime_api import fetch_evolution_crazytime_rows
 
@@ -154,6 +159,12 @@ def _run_scrape_worker_fresh(limit: int, *, is_bootstrap: bool = False) -> Dict[
                 }
         except Exception as exc:
             last_worker_error = f"evolution-api: {type(exc).__name__}: {exc}"
+            # Se la sorgente risponde 403, sospendi Evolution per un po' e usa Playwright.
+            if "403" in str(exc):
+                _evolution_blocked_until = datetime.utcnow() + timedelta(seconds=EVOLUTION_BLOCK_COOLDOWN_SECONDS)
+    elif evo_enabled and evo_blocked:
+        wait_s = int((_evolution_blocked_until - datetime.utcnow()).total_seconds()) if _evolution_blocked_until else 0
+        last_worker_error = f"evolution-api: temporarily disabled after 403 ({max(0, wait_s)}s remaining)"
 
     pw_ok = os.getenv("SCRAPER_PLAYWRIGHT_FALLBACK", "1").strip().lower() not in ("0", "false", "no")
     if not pw_ok:
