@@ -5,10 +5,34 @@ import InstagramMarkLink from '../components/InstagramMarkLink'
 import { INSTAGRAM_URL } from '../config/social'
 import { formatItalyFromBackendIso, formatItalyTableRowTime } from '../lib/formatTime'
 
-const DEFAULT_HISTORY_CAP = 5000
+const DEFAULT_HISTORY_CAP = 4000
 
-/** Allineato alla colonna "Moltip." del sito: solo moltiplicatore finale (da backend). */
+/**
+ * Moltiplicatore finale (come schermata casino): da API e' gia il valore dopo Top Slot se matching.
+ * Cash Hunt: due valori [min, max] → "100x — 2000x". Crazy Bonus: tre valori separati da spazio.
+ */
 function displayFinalMultiplier(r: any): string {
+  const raw = r?.moltip_chain ?? r?.top_slot_multipliers
+  const ws = String(r?.wheel_segment ?? '')
+  if (Array.isArray(raw) && raw.length === 2 && ws === 'CH') {
+    const ints = raw
+      .map((x: any) => Number(x))
+      .filter((x: number) => Number.isFinite(x) && x > 0)
+      .map((x: number) => Math.trunc(x))
+    if (ints.length === 2) {
+      return `${ints[0]}x — ${ints[1]}x`
+    }
+  }
+  if (Array.isArray(raw) && raw.length > 0) {
+    const ints = raw
+      .map((x: any) => Number(x))
+      .filter((x: number) => Number.isFinite(x) && x > 0)
+      .map((x: number) => Math.trunc(x))
+    if (ints.length > 0) {
+      return ints.map((n) => `${n}x`).join(' ')
+    }
+  }
+
   const fm = r?.final_multiplier
   if (fm != null && fm !== '') return `${fm}x`
   return '—'
@@ -136,6 +160,20 @@ export default function LiveDashboardNoAuth() {
     if (SEGMENT_ORDER.includes(fromIcon as any)) return fromIcon
     return ''
   }
+
+  const requiredCap = Number(data?.public_history_max_items) || DEFAULT_HISTORY_CAP
+  const savedHistRaw = data?.history_saved_rows
+  const savedHist =
+    typeof savedHistRaw === 'number' && Number.isFinite(savedHistRaw) ? savedHistRaw : Number(savedHistRaw) || 0
+  const bootPct = Math.min(100, Math.round((savedHist / Math.max(1, requiredCap)) * 100))
+  const bypassHistGate =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('skipHistory') === '1'
+  const waitFullHistory =
+    !!data &&
+    !bypassHistGate &&
+    !error &&
+    Object.prototype.hasOwnProperty.call(data, 'public_history_ready') &&
+    data.public_history_ready === false
 
   return (
     <div className="dashboard dashboard--live-full">
@@ -272,7 +310,7 @@ export default function LiveDashboardNoAuth() {
                   Moltiplicatore più alto (in queste giocate): <strong>{statWin.max_multiplier_in_window ?? '—'}</strong>
                 </span>
               </div>
-              <div className="admin-users-table live-stats-table-wrap">
+              <div className="data-table live-stats-table-wrap">
                 <table>
                   <thead>
                     <tr>
@@ -380,7 +418,7 @@ export default function LiveDashboardNoAuth() {
                     ? 'Nessuna riga in buffer.'
                     : `Ultime ${latestRowsCompact.length} di ${latestRowsAll.length} in elenco — scroll per vedere tutte nella finestra.`}
                 </p>
-                <div className="live-outcomes-scroll admin-users-table">
+                <div className="live-outcomes-scroll data-table">
                   <table>
                     <thead>
                       <tr>
@@ -484,7 +522,7 @@ export default function LiveDashboardNoAuth() {
                 <p style={{ opacity: 0.85, fontSize: '0.82rem', marginBottom: 8 }}>
                   Ogni giro un segmento top (EV max). Tentativi ≈ giri.
                 </p>
-                <div className="status-card admin-users-table">
+                <div className="status-card data-table">
                   <table>
                     <thead>
                       <tr>
@@ -525,7 +563,7 @@ export default function LiveDashboardNoAuth() {
                 <p style={{ opacity: 0.8, fontSize: '0.82rem', marginBottom: 8 }}>
                   Solo con segnale caldo o meta PLAY.
                 </p>
-                <div className="status-card admin-users-table">
+                <div className="status-card data-table">
                   <table>
                     <thead>
                       <tr>
@@ -562,6 +600,60 @@ export default function LiveDashboardNoAuth() {
         </div>
         <LegalFooter variant="dashboard" />
       </main>
+
+      {waitFullHistory && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 3000,
+            background: 'rgba(6, 8, 14, 0.92)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <div
+            className="status-card"
+            style={{
+              maxWidth: 440,
+              width: '100%',
+              textAlign: 'center',
+              padding: '28px 22px',
+            }}
+          >
+            <h2 style={{ marginTop: 0, marginBottom: 12, fontSize: '1.25rem' }}>Caricamento storico</h2>
+            <p style={{ opacity: 0.88, marginBottom: 16, lineHeight: 1.45 }}>
+              Il backend sta raccogliendo la cronologia dalla pagina (Playwright). La dashboard si sblocca quando il file
+              locale raggiunge <strong>{requiredCap}</strong> giri salvati.
+            </p>
+            <div style={{ marginBottom: 10, fontWeight: 600 }}>
+              {savedHist} / {requiredCap} ({bootPct}%)
+            </div>
+            <div
+              style={{
+                height: 10,
+                borderRadius: 6,
+                background: 'rgba(255,255,255,0.08)',
+                overflow: 'hidden',
+                marginBottom: 18,
+              }}
+            >
+              <div style={{ width: `${bootPct}%`, height: '100%', background: 'linear-gradient(90deg,#c9a227,#f0e6b4)' }} />
+            </div>
+            {data?.source_error ? (
+              <p style={{ fontSize: '0.88rem', opacity: 0.85, marginBottom: 12 }}>{String(data.source_error)}</p>
+            ) : null}
+            <p style={{ fontSize: '0.82rem', opacity: 0.65, margin: 0 }}>
+              Può richiedere molti minuti. Controlla il terminale del backend per lo stato dello scraper. Forzatura (solo
+              debug): aggiungi <code style={{ fontSize: '0.85em' }}>?skipHistory=1</code> all’URL.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

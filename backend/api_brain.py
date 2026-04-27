@@ -1,10 +1,7 @@
 """
-API Brain Engine - Crazy Time Tool
-Accesso controllato rigorosamente lato backend
+API Brain Engine - Crazy Time Tool (local-only).
 """
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, Field
+from fastapi import APIRouter
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 import time
@@ -15,17 +12,13 @@ import asyncio
 import subprocess
 import sys
 from pathlib import Path
-from live_scraper import scraper, DEFAULT_WINDOW_SIZE
+from live_scraper import scraper
 import threading
 import os
 import logging
 
-from database import get_db, User, get_user_by_id
-from security import get_current_user_id, get_client_ip, limiter
 from brain_engine import BrainEngine, ALL_SEGMENTS, THEORETICAL_PROBS
 from live_window_stats import compute_live_window_stats
-from notifier import notify_hot_signals
-from external_public_cache import public_cache_load, public_cache_store
 from live_data_pipeline import (
     apply_brain_spin,
     row_dedupe_key,
@@ -39,6 +32,18 @@ router = APIRouter(prefix="/brain", tags=["Crazy Time Tool"])
 logger = logging.getLogger(__name__)
 CRAZY_TIME_SOURCE_URL = "https://www.casino.org/casinoscores/it/crazy-time/"
 SCRAPER_VERSION = "2026-04-11-v5-pipeline-utc"
+_public_cached_payload: Optional[Dict[str, Any]] = None
+_public_cached_ts: float = 0.0
+
+
+def public_cache_load() -> tuple[Optional[Dict[str, Any]], float]:
+    return _public_cached_payload, _public_cached_ts
+
+
+def public_cache_store(payload: Optional[Dict[str, Any]], ts: Optional[float] = None) -> None:
+    global _public_cached_payload, _public_cached_ts
+    _public_cached_payload = payload
+    _public_cached_ts = float(time.time() if ts is None else ts)
 
 
 def _iso_utc_z(dt: Optional[datetime] = None) -> str:
@@ -68,10 +73,31 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(value, maximum))
 
 
-PUBLIC_BOOTSTRAP_WORKER_LIMIT = _env_int("PUBLIC_BOOTSTRAP_WORKER_LIMIT", 5000, 100, 20000)
+# File storico / pattern (usati anche da reset avvio)
+PUBLIC_HISTORY_FILE = Path(__file__).resolve().parent / "public_history.json"
+PUBLIC_PATTERNS_FILE = Path(__file__).resolve().parent / "public_patterns.json"
+
+# Finestra sul disco: default 4000 righe (minimo richiesto utente); solo le piu' recenti dalla pagina.
+PUBLIC_HISTORY_MAX_ITEMS = max(4000, min(int(os.getenv("PUBLIC_HISTORY_MAX_ITEMS", "4000")), 20000))
+
+# Bootstrap: prendi sempre almeno tanto quanto la finestra disco (di solito 5000 righe scrape).
+PUBLIC_BOOTSTRAP_WORKER_LIMIT = _env_int(
+    "PUBLIC_BOOTSTRAP_WORKER_LIMIT",
+    max(5000, PUBLIC_HISTORY_MAX_ITEMS),
+    max(4000, PUBLIC_HISTORY_MAX_ITEMS),
+    20000,
+)
 PUBLIC_LIVE_WORKER_LIMIT = _env_int("PUBLIC_LIVE_WORKER_LIMIT", 120, 20, 5000)
 PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS = _env_int("PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS", 90, 10, 900)
 EVOLUTION_BLOCK_COOLDOWN_SECONDS = _env_int("EVOLUTION_BLOCK_COOLDOWN_SECONDS", 3600, 60, 86400)
+PUBLIC_BOOTSTRAP_WARMUP_LIMIT = _env_int("PUBLIC_BOOTSTRAP_WARMUP_LIMIT", 800, 200, 2000)
+# Snapshot su disco solo se lo scrape ha davvero riempito la tabella (evita wipe con ~30 righe da API/HTML).
+PUBLIC_HISTORY_SNAPSHOT_MIN_ROWS = _env_int(
+    "PUBLIC_HISTORY_SNAPSHOT_MIN_ROWS",
+    max(600, PUBLIC_HISTORY_MAX_ITEMS // 8),
+    80,
+    min(15000, PUBLIC_HISTORY_MAX_ITEMS),
+)
 
 
 def _run_scrape_worker(limit: int = 60, hours_override: Optional[int] = None) -> Dict[str, Any]:
@@ -92,7 +118,8 @@ def _run_scrape_worker(limit: int = 60, hours_override: Optional[int] = None) ->
     elif limit <= 1000:
         timeout_sec = 150
     else:
-        timeout_sec = 240
+        # Storico profondo: scroll lungo sul sito (possono servire molti minuti).
+        timeout_sec = max(900, int(os.getenv("SCRAPER_DEEP_TIMEOUT_SECONDS", "1200")))
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"worker rc={proc.returncode}")
@@ -120,32 +147,26 @@ def _scrape_hours_for_phase(is_bootstrap: bool) -> int:
     return hours
 
 
-def _run_scrape_worker_fresh(limit: int, *, is_bootstrap: bool = False) -> Dict[str, Any]:
+def _run_scrape_worker_fresh(
+    limit: int,
+    *,
+    is_bootstrap: bool = False,
+    force_playwright: bool = False,
+) -> Dict[str, Any]:
     """
     Esegue lo scrape e, se la sorgente e' in ritardo oltre soglia, riprova subito
     scegliendo il payload con lag migliore.
 
-    Ordine: 1) Redis buffer (worker separato, opzionale); 2) API JSON Evolution;
-    3) worker Playwright (se abilitato).
+    Ordine: 1) API JSON Evolution; 2) worker Playwright (se abilitato).
+    force_playwright: salta Evolution (es. storico disco ancora vuoto: l'API spesso resta ~30 righe).
     """
     last_worker_error: Optional[str] = None
-    if os.getenv("LIVE_ROWS_FROM_REDIS", "0").strip().lower() in ("1", "true", "yes"):
-        try:
-            from live_rows_redis import try_load_live_rows
-
-            rrows = try_load_live_rows()
-            if rrows:
-                return {
-                    "rows": rrows[:limit],
-                    "screenshot": None,
-                    "_worker_debug": "source=redis-live-buffer",
-                }
-        except Exception as exc:
-            last_worker_error = f"redis-live: {type(exc).__name__}: {exc}"
 
     global _evolution_blocked_until
     evo_enabled = os.getenv("SCRAPER_USE_EVOLUTION_API", "0").strip().lower() not in ("0", "false", "no")
     evo_blocked = isinstance(_evolution_blocked_until, datetime) and datetime.utcnow() < _evolution_blocked_until
+    if force_playwright:
+        evo_enabled = False
     if evo_enabled and not evo_blocked:
         try:
             from crazytime_api import fetch_evolution_crazytime_rows
@@ -214,30 +235,31 @@ def _run_scrape_worker_fresh(limit: int, *, is_bootstrap: bool = False) -> Dict[
     return best_payload
 
 
+def _public_history_ready_flag(saved_rows: int) -> bool:
+    return saved_rows >= PUBLIC_HISTORY_MAX_ITEMS
+
+
 def _select_public_worker_limit(state: Dict[str, Any]) -> int:
     """
-    Se lo storico persistito non e' ancora pieno, mantieni backfill profondo.
-    Quando arriva a capienza, torna al limite live leggero.
+    Backfill a step per non restare minuti con UI a 0:
+    - fase warmup: limite ridotto per ottenere prime centinaia di righe rapidamente
+    - fase intermedia: limite medio
+    - fase finale: limite bootstrap pieno fino a raggiungere capienza su disco
     """
-    is_bootstrap = len(state.get("seen") or set()) == 0
-    if is_bootstrap:
-        state["last_deep_backfill_at"] = datetime.utcnow()
-        return PUBLIC_BOOTSTRAP_WORKER_LIMIT
     try:
         saved_rows = len(_load_public_history())
     except Exception:
         saved_rows = 0
+    if saved_rows <= 0:
+        state["last_deep_backfill_at"] = datetime.utcnow()
+        return min(PUBLIC_BOOTSTRAP_WORKER_LIMIT, PUBLIC_BOOTSTRAP_WARMUP_LIMIT)
+    mid_target = min(PUBLIC_HISTORY_MAX_ITEMS, max(PUBLIC_BOOTSTRAP_WARMUP_LIMIT * 2, 1500))
+    if saved_rows < mid_target:
+        state["last_deep_backfill_at"] = datetime.utcnow()
+        return min(PUBLIC_BOOTSTRAP_WORKER_LIMIT, 2000)
     if saved_rows < PUBLIC_HISTORY_MAX_ITEMS:
-        last_backfill = state.get("last_deep_backfill_at")
-        elapsed = (
-            (datetime.utcnow() - last_backfill).total_seconds()
-            if isinstance(last_backfill, datetime)
-            else 10**9
-        )
-        if elapsed >= PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS:
-            state["last_deep_backfill_at"] = datetime.utcnow()
-            return PUBLIC_BOOTSTRAP_WORKER_LIMIT
-        return PUBLIC_LIVE_WORKER_LIMIT
+        state["last_deep_backfill_at"] = datetime.utcnow()
+        return PUBLIC_BOOTSTRAP_WORKER_LIMIT
     return PUBLIC_LIVE_WORKER_LIMIT
 
 
@@ -245,20 +267,9 @@ def _time_lag_seconds(rows: List[Dict[str, Any]]) -> Optional[int]:
     lag = pipeline_time_lag_seconds(rows)
     if lag is not None:
         return lag
-    # Fallback deprecato: solo HH:MM locale (inaffidabile su server UTC vs orario Italia).
-    if not rows:
-        return None
-    t = str(rows[0].get("time") or "")
-    m = re.match(r"^(\d{1,2}):(\d{2})$", t)
-    if not m:
-        return None
-    row_min = int(m.group(1)) * 60 + int(m.group(2))
-    now = datetime.now(timezone.utc)
-    now_min = now.hour * 60 + now.minute
-    lag_min = now_min - row_min
-    if lag_min < 0:
-        lag_min += 24 * 60
-    return lag_min * 60
+    # Se non abbiamo timestamp UTC affidabile, non stimare il lag da sola HH:MM:
+    # puo' produrre falsi ritardi enormi (timezone/giorno diverso).
+    return None
 
 
 def _rows_latest_first(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -324,7 +335,17 @@ async def refresh_public_cache_once() -> None:
     try:
         is_bootstrap = len(state.get("seen") or set()) == 0
         worker_limit = _select_public_worker_limit(state)
-        payload = await asyncio.to_thread(_run_scrape_worker_fresh, worker_limit, is_bootstrap=is_bootstrap)
+        try:
+            saved_rows_hint = len(_load_public_history())
+        except Exception:
+            saved_rows_hint = 0
+        force_pw = saved_rows_hint < PUBLIC_HISTORY_MAX_ITEMS
+        payload = await asyncio.to_thread(
+            _run_scrape_worker_fresh,
+            worker_limit,
+            is_bootstrap=is_bootstrap,
+            force_playwright=force_pw,
+        )
         fetched_rows = payload.get("rows") or []
         lag_seconds = _time_lag_seconds(fetched_rows)
         parsed_rows = _clean_rows(fetched_rows)
@@ -368,18 +389,9 @@ async def refresh_public_cache_once() -> None:
                 state["seen"].add(key)
                 new_count_local += 1
 
-        # Persist + cache payload
+        # Persist + cache payload (finestra fresca dopo scrape profondo)
         try:
-            existing = _load_public_history()
-            existing_keys = {str(x.get("key")) for x in existing if isinstance(x, dict)}
-            now_ts = time.time()
-            for row in parsed_rows:
-                k2 = row_dedupe_key(row)
-                if k2 in existing_keys:
-                    continue
-                existing.append({"key": k2, "observed_at": now_ts, "row": row})
-                existing_keys.add(k2)
-            _save_public_history(existing)
+            _persist_public_history(parsed_rows, worker_limit)
         except Exception:
             pass
 
@@ -416,6 +428,7 @@ async def refresh_public_cache_once() -> None:
                 "history_saved_6h_rows": saved_rows,
                 "history_saved_rows": saved_rows,
                 "public_history_max_items": PUBLIC_HISTORY_MAX_ITEMS,
+                "public_history_ready": _public_history_ready_flag(saved_rows),
                 "scraper_cronologia_hours_hint": int(os.getenv("SCRAPER_CRONOLOGIA_HOURS", "6") or 6),
                 "last_poll": _iso_utc_z(state["last_poll"]),
                 "last_screenshot": state.get("last_screenshot"),
@@ -434,11 +447,6 @@ async def refresh_public_cache_once() -> None:
             }
 
         payload_out_local = _build_payload_local(source_ok_local, source_error_local, new_count_local)
-        if new_count_local > 0:
-            try:
-                await notify_hot_signals(payload_out_local.get("hot_signals") or [], source="public")
-            except Exception:
-                pass
         public_cache_store(payload_out_local)
     except Exception as e:
         # Non far crashare il loop, ma esponi l'errore nel payload
@@ -448,6 +456,10 @@ async def refresh_public_cache_once() -> None:
                 state_last_poll = _iso_utc_z(state.get("last_poll")) if isinstance(state.get("last_poll"), datetime) else None
             except Exception:
                 state_last_poll = None
+            try:
+                _saved_err = len(_load_public_history())
+            except Exception:
+                _saved_err = 0
             err_payload: Dict[str, Any] = {
                 "scraper_version": SCRAPER_VERSION,
                 "debug_now": _iso_utc_z(),
@@ -462,8 +474,10 @@ async def refresh_public_cache_once() -> None:
                 "scraper_last_rows_count": getattr(scraper, "last_rows_count", None),
                 "scraper_module": getattr(scraper, "__class__", type(scraper)).__module__,
                 "scraper_rows_count": len((state.get("rows") or []) if isinstance(state.get("rows"), list) else []),
-                "history_saved_6h_rows": len(_load_public_history()),
-                "history_saved_rows": len(_load_public_history()),
+                "history_saved_6h_rows": _saved_err,
+                "history_saved_rows": _saved_err,
+                "public_history_max_items": PUBLIC_HISTORY_MAX_ITEMS,
+                "public_history_ready": _public_history_ready_flag(_saved_err),
                 "last_poll": state_last_poll or _iso_utc_z(),
                 "last_screenshot": state.get("last_screenshot") if isinstance(state, dict) else None,
                 "new_rows_added": 0,
@@ -540,9 +554,69 @@ async def stop_public_ingestion_loop() -> None:
     except Exception:
         pass
 
-PUBLIC_HISTORY_FILE = Path(__file__).resolve().parent / "public_history.json"
-PUBLIC_PATTERNS_FILE = Path(__file__).resolve().parent / "public_patterns.json"
-PUBLIC_HISTORY_MAX_ITEMS = max(100, min(int(os.getenv("PUBLIC_HISTORY_MAX_ITEMS", "5000")), 20000))
+
+def _snapshot_public_history_items(parsed_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Ultime PUBLIC_HISTORY_MAX_ITEMS righe (piu' recenti), ordine cronologico sul disco."""
+    if not parsed_rows:
+        return []
+    newest_first = _rows_latest_first(parsed_rows)
+    newest_slice = newest_first[:PUBLIC_HISTORY_MAX_ITEMS]
+    oldest_first = list(reversed(newest_slice))
+    ts = time.time()
+    out: List[Dict[str, Any]] = []
+    for row in oldest_first:
+        out.append({"key": row_dedupe_key(row), "observed_at": ts, "row": row})
+    return out
+
+
+def _persist_public_history(parsed_rows: List[Dict[str, Any]], worker_limit: int) -> None:
+    """
+    Scrape profondo: rimpiazza il file con lo snapshot fresco dalla pagina (finestra N).
+    Aggiornamenti live piccoli: merge + trim (non cancellare migliaia di righe per un poll da 120/240).
+    """
+    if not parsed_rows:
+        return
+    wants_deep = worker_limit >= max(PUBLIC_BOOTSTRAP_WORKER_LIMIT // 2, 2000) or len(parsed_rows) >= (
+        PUBLIC_HISTORY_MAX_ITEMS - 500
+    )
+    # Sostituisci il file solo se abbiamo abbastanza righe; altrimenti merge (evita erase con ~26–40 righe).
+    deep_fetch = wants_deep and len(parsed_rows) >= PUBLIC_HISTORY_SNAPSHOT_MIN_ROWS
+    if deep_fetch:
+        _save_public_history(_snapshot_public_history_items(parsed_rows))
+        return
+    try:
+        existing = _load_public_history()
+        existing_keys = {str(x.get("key")) for x in existing if isinstance(x, dict)}
+        now_ts = time.time()
+        for row in parsed_rows:
+            k2 = row_dedupe_key(row)
+            if k2 in existing_keys:
+                continue
+            existing.append({"key": k2, "observed_at": now_ts, "row": row})
+            existing_keys.add(k2)
+        _save_public_history(existing)
+    except Exception:
+        pass
+
+
+def reset_persistent_public_store_on_startup() -> None:
+    """
+    Ad ogni riavvio: svuota solo public_history.json (giri ruota). I pattern restano sempre su disco:
+    il cervello li aggiorna/scarta quando sono obsoleti — non si cancellano qui.
+    """
+    global _public_bootstrapped
+    reset_h = os.getenv("PUBLIC_RESET_HISTORY_ON_START", "1").strip().lower() in {"1", "true", "yes", "on"}
+    if reset_h:
+        try:
+            PUBLIC_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            PUBLIC_HISTORY_FILE.write_text(
+                json.dumps({"saved_at": time.time(), "items": [], "reset_on_startup": True}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            logger.info("public_history.json azzerato all'avvio (solo storico giri; pattern preservati)")
+        except Exception:
+            logger.exception("reset public_history.json fallito")
+        _public_bootstrapped = False
 
 
 def _keep_last_public_history(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -654,6 +728,7 @@ def _clean_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         slot_seg = _normalize_segment(slot_icon) or _normalize_segment(slot) or _normalize_segment(str(row.get("slot_segment") or ""))
         seg = wheel_seg or slot_seg
         top = row.get("top_slot_multipliers") or []
+        moltip_chain = row.get("moltip_chain")
         max_m = row.get("max_multiplier")
         top_only = row.get("top_slot_multiplier")
         # Colonna "Moltip.": Evolution espone maxMultiplier; dalla tabella HTML spesso compaiono piu "Nx"
@@ -670,6 +745,20 @@ def _clean_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 final_mult = ints[-1]
         elif final_mult is None and wheel_seg and str(wheel_seg).isdigit():
             final_mult = int(wheel_seg)
+
+        # Moltip.: da evolution-api arriva gia moltip_chain / maxMultiplier (match Top Slot incluso).
+        # Senza moltip_chain (DOM): usa i molti dalla cella o, se vuota, base esito numerico.
+        moltip_display: List[Any]
+        if moltip_chain is not None:
+            moltip_display = list(moltip_chain)
+        else:
+            moltip_display = list(top)
+        if moltip_chain is None and wheel_seg in ("1", "2", "5", "10") and not moltip_display:
+            try:
+                moltip_display = [int(wheel_seg)]
+            except (TypeError, ValueError):
+                pass
+
         cleaned.append(
             {
                 "event_id": row.get("event_id") or "",
@@ -683,7 +772,8 @@ def _clean_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "slot_icon": slot_icon or None,
                 "wheel_result": wheel,
                 "wheel_icon": wheel_icon or None,
-                "top_slot_multipliers": top,
+                "moltip_chain": moltip_display,
+                "top_slot_multipliers": moltip_display,
                 "top_slot_multiplier": top_only if top_only is not None else None,
                 "max_multiplier": int(max_m) if max_m is not None else None,
                 "final_multiplier": final_mult,
@@ -755,301 +845,10 @@ def _fetch_live_rows_sync() -> List[Dict[str, Any]]:
     return _extract_rows_from_html(html)
 
 
-# ============================================================================
-# ACCESS CONTROL MIDDLEWARE
-# ============================================================================
-
-async def verify_tool_access(
-    user_id: int,
-    db: AsyncSession,
-    redirect: bool = False
-) -> User:
-    """
-    Verifica rigorosa accesso al tool.
-    BLOCCA accesso se:
-    - Utente non ha pagato e trial scaduto
-    - Abbonamento scaduto
-    - Account inattivo
-    
-    PERMETTE accesso se:
-    - Admin
-    - VIP
-    - Abbonamento attivo
-    - Trial attivo (primi 100 utenti)
-    """
-    user = await get_user_by_id(db, user_id)
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Utente non trovato"
-        )
-    
-    # Admin e VIP sempre accesso
-    if user.role in ["admin", "vip"]:
-        return user
-    
-    # Verifica account attivo
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "message": "Account disattivato",
-                "redirect": "/account-disabled",
-                "can_access": False
-            }
-        )
-    
-    # Verifica accesso
-    can_access = user.can_access_tool()
-    
-    if not can_access:
-        # Determina messaggio appropriato
-        if user.subscription_status == "none":
-            message = "Per utilizzare il tool devi attivare un abbonamento"
-            redirect_url = "/pricing"
-        elif user.subscription_status == "expired":
-            message = "Il tuo abbonamento è scaduto. Rinnova per continuare."
-            redirect_url = "/pricing"
-        elif user.subscription_status == "cancelled":
-            message = "Abbonamento cancellato. Riattiva per continuare."
-            redirect_url = "/pricing"
-        else:
-            message = "Accesso negato. Abbonamento richiesto."
-            redirect_url = "/pricing"
-        
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "message": message,
-                "redirect": redirect_url,
-                "can_access": False,
-                "subscription_status": user.subscription_status,
-                "trial_end": user.trial_end.isoformat() if user.trial_end else None
-            }
-        )
-    
-    return user
-
-
-# ============================================================================
-# SCHEMAS
-# ============================================================================
-
-class StartSessionRequest(BaseModel):
-    bankroll: float = Field(..., gt=0, description="Bankroll iniziale")
-
-
-class AddSpinRequest(BaseModel):
-    segment: str = Field(..., description="Segmento uscito (1,2,5,10,CF,CH,PA,CT)")
-    multiplier: Optional[int] = Field(None, description="Moltiplicatore Top Slot")
-    mult_segment: Optional[str] = Field(None, description="Segmento del moltiplicatore")
-    bonus_data: Optional[Dict[str, Any]] = Field(None, description="Dati bonus")
-
-
-class UpdateBankrollRequest(BaseModel):
-    amount: float = Field(..., description="Importo vincita (+) o perdita (-)")
-
-
-class SessionResponse(BaseModel):
-    active: bool
-    spin_count: int
-    bankroll_start: float
-    bankroll_current: float
-    profit: float
-    profit_percent: float
-    warning: Optional[str]
-    stop: bool
-
-
-class DecisionResponse(BaseModel):
-    action: str
-    segment: Optional[str]
-    confidence: float
-    ev: float
-    suggested_stake: float
-    risk_level: str
-    reason: str
-    alternatives: List[Dict]
-
-
-# ============================================================================
-# ROUTES
-# ============================================================================
-
-@router.get("/access-status")
-async def check_access_status(
-    request: Request,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Verifica stato accesso al tool"""
-    user = await get_user_by_id(db, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Utente non trovato")
-    
-    return {
-        "can_access": user.can_access_tool(),
-        "role": user.role,
-        "subscription_status": user.subscription_status,
-        "is_trial_active": user.is_trial_active(),
-        "trial_end": user.trial_end.isoformat() if user.trial_end else None,
-        "subscription_end": user.subscription_current_period_end.isoformat() if user.subscription_current_period_end else None,
-    }
-
-
-@router.get("/casino-source")
-async def get_casino_source_data(
-    request: Request,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Recupera e sintetizza i dati pubblici dalla pagina Crazy Time."""
-    await verify_tool_access(user_id, db)
-
-    async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.get(CRAZY_TIME_SOURCE_URL)
-        response.raise_for_status()
-        html = response.text
-
-    clean_text = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
-    clean_text = re.sub(r"<style[\s\S]*?</style>", " ", clean_text, flags=re.IGNORECASE)
-    clean_text = re.sub(r"<[^>]+>", " ", clean_text)
-    clean_text = re.sub(r"\s+", " ", clean_text).strip()
-
-    def extract_block(keyword: str, span: int = 420) -> str:
-        idx = clean_text.lower().find(keyword.lower())
-        if idx == -1:
-            return ""
-        return clean_text[idx: idx + span].strip()
-
-    return {
-        "source_url": CRAZY_TIME_SOURCE_URL,
-        "fetched_at": datetime.utcnow().isoformat(),
-        "summary": {
-            "intro": extract_block("Crazy Time è un gioco dal vivo"),
-            "history": extract_block("Cronologia Giocate"),
-            "top_slot": extract_block("Top Slot Abbinata Risultato Ruota"),
-            "bonus_coin_flip": extract_block("Coin flip"),
-            "bonus_cash_hunt": extract_block("Cash Hunt"),
-            "bonus_pachinko": extract_block("Pachinko"),
-            "bonus_crazy_time": extract_block("Crazy Time Gioco Bonus"),
-            "faq": extract_block("Statistiche Crazy Time FAQs", span=650),
-        }
-    }
-
-
-@router.get("/auto-brain")
-async def auto_brain_status(
-    request: Request,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Modalità automatica:
-    - ogni 2 secondi legge la pagina sorgente
-    - aggiunge nuovi spin nel BrainEngine
-    - restituisce segnali caldi e ultime righe cronologia
-    """
-    await verify_tool_access(user_id, db)
-    brain = get_or_create_session(user_id)
-
-    if not brain.session_active:
-        brain.start_session(100.0)
-
-    state = auto_state.setdefault(
-        user_id,
-        {
-            "last_poll": datetime.utcnow() - timedelta(seconds=3),
-            "seen": set(),
-            "rows": [],
-            "consecutive_failures": 0,
-            "last_deep_backfill_at": datetime.utcnow() - timedelta(seconds=PUBLIC_DEEP_BACKFILL_INTERVAL_SECONDS),
-        }
-    )
-
-    now = datetime.utcnow()
-    # Se non abbiamo ancora righe, poll immediatamente (bootstrap UI + segnali).
-    should_poll = (not state.get("rows")) or (now - state["last_poll"]).total_seconds() >= 2
-    parsed_rows: List[Dict[str, Any]] = state["rows"]
-    new_count = 0
-    source_ok = True
-    source_error = None
-
-    if should_poll:
-        try:
-            payload = await asyncio.to_thread(_run_scrape_worker_fresh, 80)
-            fetched_rows = payload.get("rows") or []
-            lag_seconds = _time_lag_seconds(fetched_rows)
-            parsed_rows = _clean_rows(fetched_rows)
-            state["last_screenshot"] = payload.get("screenshot")
-            state["last_poll"] = now
-            if not parsed_rows:
-                state["consecutive_failures"] = int(state.get("consecutive_failures") or 0) + 1
-                worker_dbg = str(payload.get("_worker_debug") or "").strip()
-                base_msg = "Nessuna riga trovata nella tabella (Cronologia Giocate)"
-                if state.get("rows") and state["consecutive_failures"] < SOURCE_FAILURE_THRESHOLD:
-                    source_ok = True
-                    source_error = (
-                        f"Fonte intermittente: fallimento {state['consecutive_failures']}/{SOURCE_FAILURE_THRESHOLD-1}, uso ultimo buffer valido."
-                    )
-                else:
-                    source_ok = False
-                    source_error = f"{base_msg}. Worker: {worker_dbg}" if worker_dbg else base_msg
-            else:
-                state["rows"] = parsed_rows
-                state["consecutive_failures"] = 0
-                source_error = None if (lag_seconds is None or lag_seconds <= MAX_ALLOWED_SOURCE_LAG_SECONDS) else f"Dati in ritardo: ~{lag_seconds}s"
-        except Exception as exc:
-            source_ok = False
-            source_error = str(exc)
-
-        for row in _rows_oldest_first(parsed_rows):
-            key = row_dedupe_key(row)
-            if key in state["seen"]:
-                continue
-            wheel_seg = row.get("wheel_segment") or row.get("segment")
-            slot_seg = row.get("slot_segment")
-            if not row_valid_for_brain(row, wheel_seg):
-                logger.warning("auto_brain: scarto riga non valida wheel_seg=%s", wheel_seg)
-                state["seen"].add(key)
-                continue
-            apply_brain_spin(brain, str(wheel_seg), slot_seg, row)
-            state["seen"].add(key)
-            new_count += 1
-
-    hot_signals = brain.get_best_signals(4)
-    next_pick = hot_signals[0] if hot_signals else None
-
-    return {
-        "scraper_version": SCRAPER_VERSION,
-        "debug_now": _iso_utc_z(),
-        "auto_mode": True,
-        "poll_interval_seconds": 2,
-        "source_url": CRAZY_TIME_SOURCE_URL,
-        "source_ok": source_ok,
-        "source_error": source_error,
-        "source_lag_seconds": _time_lag_seconds(state.get("rows") or []),
-        "scraper_last_error": getattr(scraper, "last_error", None),
-        "scraper_last_rows_count": getattr(scraper, "last_rows_count", None),
-        "scraper_module": getattr(scraper, "__class__", type(scraper)).__module__,
-        "last_poll": _iso_utc_z(state["last_poll"]),
-        "last_screenshot": state.get("last_screenshot"),
-        "new_rows_added": new_count,
-        "tracked_rows": len(state["seen"]),
-        "latest_rows": _rows_latest_first(state["rows"])[:24],
-        "source_latest_time": (_rows_latest_first(state["rows"])[0].get("time") if state.get("rows") else None),
-        "source_consecutive_failures": int(state.get("consecutive_failures") or 0),
-        "next_hot_signal": next_pick,
-        "hot_signals": hot_signals,
-        "session": brain.get_session_status(),
-    }
-
-
 @router.get("/auto-brain-public")
 async def auto_brain_public():
     """
-    Versione pubblica senza login (solo uso locale/dimostrativo).
+    Versione pubblica locale (solo uso locale/dimostrativo).
     """
     user_id = PUBLIC_GUEST_ID
     brain = get_or_create_session(user_id)
@@ -1128,6 +927,7 @@ async def auto_brain_public():
             "history_saved_6h_rows": saved_rows,
             "history_saved_rows": saved_rows,
             "public_history_max_items": PUBLIC_HISTORY_MAX_ITEMS,
+            "public_history_ready": _public_history_ready_flag(saved_rows),
             "scraper_cronologia_hours_hint": int(os.getenv("SCRAPER_CRONOLOGIA_HOURS", "6") or 6),
             "last_poll": _iso_utc_z(state["last_poll"]),
             "last_screenshot": state.get("last_screenshot"),
@@ -1160,7 +960,17 @@ async def auto_brain_public():
             try:
                 is_bootstrap = len(state.get("seen") or set()) == 0
                 worker_limit = _select_public_worker_limit(state)
-                payload = await asyncio.to_thread(_run_scrape_worker_fresh, worker_limit, is_bootstrap=is_bootstrap)
+                try:
+                    saved_rows_hint = len(_load_public_history())
+                except Exception:
+                    saved_rows_hint = 0
+                force_pw = saved_rows_hint < PUBLIC_HISTORY_MAX_ITEMS
+                payload = await asyncio.to_thread(
+                    _run_scrape_worker_fresh,
+                    worker_limit,
+                    is_bootstrap=is_bootstrap,
+                    force_playwright=force_pw,
+                )
                 fetched_rows = payload.get("rows") or []
                 lag_seconds = _time_lag_seconds(fetched_rows)
                 parsed_rows = _clean_rows(fetched_rows)
@@ -1201,16 +1011,7 @@ async def auto_brain_public():
                         new_count_local += 1
 
                     try:
-                        existing = _load_public_history()
-                        existing_keys = {str(x.get("key")) for x in existing if isinstance(x, dict)}
-                        now_ts = time.time()
-                        for row in parsed_rows:
-                            k2 = row_dedupe_key(row)
-                            if k2 in existing_keys:
-                                continue
-                            existing.append({"key": k2, "observed_at": now_ts, "row": row})
-                            existing_keys.add(k2)
-                        _save_public_history(existing)
+                        _persist_public_history(parsed_rows, worker_limit)
                     except Exception:
                         pass
 
@@ -1220,11 +1021,6 @@ async def auto_brain_public():
                         pass
 
                     payload_out_local = _build_payload(source_ok_local, source_error_local, new_count_local)
-                    if new_count_local > 0:
-                        try:
-                            await notify_hot_signals(payload_out_local.get("hot_signals") or [], source="public")
-                        except Exception:
-                            pass
                     public_cache_store(payload_out_local)
             except Exception as e:
                 payload_out_local = _build_payload(False, str(e), 0)
@@ -1244,9 +1040,11 @@ async def auto_brain_public():
             return cached
         return cached
 
-    # No cached data yet: return fast “empty but valid” payload; background thread will fill it.
-    # Importante: se non abbiamo righe, non segnare la fonte come OK.
-    # Mostra un messaggio utile in UI mentre il refresh in background prova a riempire la cache.
+    # No cached data yet: se abbiamo gia' righe in memoria (bootstrap da file), usale subito.
+    if state.get("rows"):
+        return _build_payload(True, None, 0)
+
+    # Se non abbiamo righe, mostra un messaggio utile mentre il refresh prova a riempire la cache.
     fallback_err = getattr(scraper, "last_error", None) or (
         "Avvio: cache pubblica in caricamento (pochi secondi). "
         "Se resta vuoto, controlla log API (Playwright/timeout). "
@@ -1254,261 +1052,3 @@ async def auto_brain_public():
     )
     return _build_payload(False, fallback_err, 0)
 
-
-@router.post("/session/start")
-async def start_session(
-    request: Request,
-    session_data: StartSessionRequest,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Avvia nuova sessione di gioco.
-    Richiede abbonamento attivo o trial valido.
-    """
-    # Verifica accesso rigorosa
-    user = await verify_tool_access(user_id, db)
-    
-    # Crea o resetta sessione
-    brain = get_or_create_session(user_id)
-    brain.start_session(session_data.bankroll)
-    
-    return {
-        "message": "Sessione avviata",
-        "session": brain.get_session_status()
-    }
-
-
-@router.post("/session/end")
-async def end_session(
-    request: Request,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Termina sessione e restituisce statistiche"""
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    brain = get_or_create_session(user_id)
-    stats = brain.end_session()
-    
-    # Cancella sessione
-    clear_session(user_id)
-    
-    return {
-        "message": "Sessione terminata",
-        "statistics": stats
-    }
-
-
-@router.get("/session/status")
-async def get_session_status(
-    request: Request,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-) -> SessionResponse:
-    """Restituisce stato sessione corrente"""
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    brain = get_or_create_session(user_id)
-    status_data = brain.get_session_status()
-    
-    return SessionResponse(**status_data)
-
-
-@router.post("/spin")
-async def add_spin(
-    request: Request,
-    spin_data: AddSpinRequest,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Registra un nuovo giro e ottiene decisione.
-    Richiede sessione attiva.
-    """
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    # Validazione segmento
-    if spin_data.segment not in ALL_SEGMENTS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Segmento non valido. Valori: {', '.join(ALL_SEGMENTS)}"
-        )
-    
-    brain = get_or_create_session(user_id)
-    
-    try:
-        result = brain.add_spin(
-            segment=spin_data.segment,
-            multiplier=spin_data.multiplier,
-            mult_segment=spin_data.mult_segment,
-            bonus_data=spin_data.bonus_data
-        )
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/bankroll/update")
-async def update_bankroll(
-    request: Request,
-    update_data: UpdateBankrollRequest,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Aggiorna bankroll (vincita o perdita)"""
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    brain = get_or_create_session(user_id)
-    brain.bankroll_engine.update_bankroll(update_data.amount)
-    
-    return {
-        "message": "Bankroll aggiornata",
-        "session": brain.get_session_status()
-    }
-
-
-@router.get("/decision", response_model=DecisionResponse)
-async def get_decision(
-    request: Request,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Ottiene decisione corrente del MetaBrain"""
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    brain = get_or_create_session(user_id)
-    decision = brain.get_meta_decision()
-    
-    return DecisionResponse(**decision)
-
-
-@router.get("/signals")
-async def get_signals(
-    request: Request,
-    top_n: int = 3,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Restituisce migliori segnali attivi"""
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    brain = get_or_create_session(user_id)
-    signals = brain.get_best_signals(top_n)
-    
-    return {"signals": signals}
-
-
-@router.get("/brains")
-async def get_all_brains_status(
-    request: Request,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Restituisce stato di tutti i MiniBrains"""
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    brain = get_or_create_session(user_id)
-    statuses = brain.get_all_brains_status()
-    
-    return {"brains": statuses}
-
-
-@router.get("/brain/{segment}")
-async def get_brain_status(
-    request: Request,
-    segment: str,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Restituisce stato di un MiniBrain specifico"""
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    if segment not in ALL_SEGMENTS:
-        raise HTTPException(status_code=400, detail="Segmento non valido")
-    
-    brain = get_or_create_session(user_id)
-    status = brain.get_brain_status(segment)
-    
-    return {"brain": status}
-
-
-@router.get("/history")
-async def get_spin_history(
-    request: Request,
-    count: int = 20,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Restituisce storico spin"""
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    brain = get_or_create_session(user_id)
-    history = brain.get_last_spins(count)
-    
-    return {"history": history}
-
-
-@router.get("/patterns")
-async def get_learned_patterns(
-    request: Request,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Restituisce pattern appresi"""
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    brain = get_or_create_session(user_id)
-    patterns = brain.get_learned_patterns()
-    
-    return {"patterns": patterns}
-
-
-@router.get("/ev/{segment}")
-async def calculate_ev(
-    request: Request,
-    segment: str,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Calcola EV per un segmento"""
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    if segment not in ALL_SEGMENTS:
-        raise HTTPException(status_code=400, detail="Segmento non valido")
-    
-    brain = get_or_create_session(user_id)
-    ev = brain.calculate_ev(segment)
-    
-    return {"segment": segment, "ev": ev}
-
-
-@router.get("/stakes/{segment}")
-async def calculate_stakes(
-    request: Request,
-    segment: str,
-    user_id: int = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db)
-):
-    """Calcola stakes progressivi per un segmento"""
-    # Verifica accesso
-    user = await verify_tool_access(user_id, db)
-    
-    if segment not in ALL_SEGMENTS:
-        raise HTTPException(status_code=400, detail="Segmento non valido")
-    
-    brain = get_or_create_session(user_id)
-    stakes = brain.calculate_stakes(segment)
-    
-    return {"segment": segment, "stakes": stakes}
